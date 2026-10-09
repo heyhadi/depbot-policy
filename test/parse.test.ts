@@ -225,6 +225,25 @@ describe("parsePolicy: policy rules", () => {
     ]);
   });
 
+  it("rejects a block entry scoped to an ecosystem the policy doesn't configure", () => {
+    const errors = errorsOf(
+      parsePolicy(`${base}\nblock: [{ name: react, reason: Pinned, ecosystems: [npm, pip] }]`),
+    );
+
+    expect(errors).toEqual([
+      {
+        path: "block[0].ecosystems[1]",
+        message: 'No "pip" ecosystem is configured in this policy',
+      },
+    ]);
+  });
+
+  it("does not crash when block has the wrong shape", () => {
+    const errors = errorsOf(parsePolicy(`${base}\nblock: x`));
+
+    expect(errors.map((error) => error.path)).toEqual(["block"]);
+  });
+
   it("allows the same ecosystem in different directories", () => {
     const result = parsePolicy(
       "version: 1\necosystems: [{ type: npm, directory: / }, { type: npm, directory: /web }]",
