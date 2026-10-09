@@ -138,6 +138,18 @@ describe("Playground", () => {
     expect(screen.getByRole("button", { name: "Link copied" })).toBeInTheDocument();
   });
 
+  it("shows this week's reviewer when the policy has a rotation", async () => {
+    const user = userEvent.setup();
+    render(<Playground />);
+
+    await replacePolicy(
+      user,
+      "version: 1\necosystems: [{ type: npm, directory: / }]\nreview: { rotation: [solo] }\n",
+    );
+
+    expect(await screen.findByText("@solo")).toBeInTheDocument();
+  });
+
   it("opens the policy from a share link", () => {
     const shared = "version: 1\necosystems: [{ type: cargo, directory: / }]\n";
     window.history.replaceState(null, "", shareUrl(window.location.href, shared));

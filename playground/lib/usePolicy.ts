@@ -3,6 +3,7 @@ import {
   generateAutoMergeWorkflow,
   generateDependabotConfig,
   parsePolicy,
+  reviewerFor,
   type Policy,
   type PolicyError,
 } from "depbot-policy";
@@ -18,6 +19,8 @@ export interface PolicyState {
   files: GeneratedFile[] | undefined;
   /** True when `files` come from an earlier version because the current one has errors. */
   stale: boolean;
+  /** This week's reviewer, when the policy is valid and has a review rotation. */
+  reviewer: string | undefined;
 }
 
 export function generateFiles(policy: Policy): GeneratedFile[] {
@@ -40,9 +43,15 @@ export function usePolicy(source: string): PolicyState {
   const [lastFiles, setLastFiles] = useState(files);
   if (files !== undefined && files !== lastFiles) setLastFiles(files);
 
+  const reviewer = useMemo(() => {
+    const rotation = result.ok ? result.policy.review?.rotation : undefined;
+    return rotation && reviewerFor(rotation, new Date());
+  }, [result]);
+
   return {
     errors: result.ok ? [] : result.errors,
     files: files ?? lastFiles,
     stale: files === undefined && lastFiles !== undefined,
+    reviewer,
   };
 }

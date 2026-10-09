@@ -1,4 +1,5 @@
 import { Document, isScalar } from "yaml";
+import { reviewerScript } from "./rotation.ts";
 import type { Policy } from "./schema.ts";
 
 type AutoMerge = Policy["autoMerge"];
@@ -33,10 +34,15 @@ const dependencyTypeValues: Record<AutoMerge["dependencyTypes"][number], string>
 
 /**
  * Builds `.github/workflows/dependabot-auto-merge.yml`: a workflow that enables auto-merge on
- * Dependabot pull requests the policy allows. Everything else is left for a human to review.
+ * Dependabot pull requests the policy allows. Everything else is left for a human to review and,
+ * with a review rotation, assigned to this week's reviewer.
  */
 export function generateAutoMergeWorkflow(policy: Policy): string {
   const { updateTypes, dependencyTypes, mergeMethod } = policy.autoMerge;
+  const prEnv = {
+    PR_URL: "${{ github.event.pull_request.html_url }}",
+    GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
+  };
 
   const doc = new Document({
     name: "Dependabot auto-merge",
@@ -55,6 +61,7 @@ export function generateAutoMergeWorkflow(policy: Policy): string {
             with: { "github-token": "${{ secrets.GITHUB_TOKEN }}" },
           },
           {
+            id: "auto-merge",
             name: "Enable auto-merge",
             if: allOf([
               anyOf("steps.metadata.outputs.update-type", updateTypes.map((type) => updateTypeValues[type])),
@@ -66,11 +73,24 @@ export function generateAutoMergeWorkflow(policy: Policy): string {
               "steps.metadata.outputs.maintainer-changes != 'true'",
             ]),
             run: `gh pr merge --auto --${mergeMethod} "$PR_URL"`,
-            env: {
-              PR_URL: "${{ github.event.pull_request.html_url }}",
-              GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}",
-            },
+            env: prEnv,
           },
+          ...(policy.review === undefined
+            ? []
+            : [
+                {
+                  name: "Request a review from this week's reviewer",
+                  // Only when the PR wasn't auto-merged, i.e. it needs a person.
+                  if: "steps.auto-merge.outcome == 'skipped'",
+                  run: reviewerScript,
+                  env: {
+                    // Usernames are validated (letters, digits, hyphens), so they're safe in shell.
+                    REVIEWERS: policy.review.rotation.join(" "),
+                    PR_CREATED_AT: "${{ github.event.pull_request.created_at }}",
+                    ...prEnv,
+                  },
+                },
+              ]),
         ],
       },
     },
