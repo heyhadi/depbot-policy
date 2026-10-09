@@ -67,6 +67,7 @@ const autoMergeSchema = z.strictObject({
     .min(1)
     .superRefine(unique((type) => type, (type) => `"${type}"`))
     .default(["development", "production"]),
+  mergeMethod: z.enum(["squash", "merge", "rebase"]).default("squash"),
 });
 
 const blockEntrySchema = z.strictObject({
@@ -111,6 +112,7 @@ export const policySchema = z.strictObject({
   autoMerge: autoMergeSchema.default({
     updateTypes: ["patch"],
     dependencyTypes: ["development", "production"],
+    mergeMethod: "squash",
   }),
   block: z
     .array(blockEntrySchema)

@@ -33,6 +33,7 @@ ecosystems:
         autoMerge: {
           updateTypes: ["patch"],
           dependencyTypes: ["development", "production"],
+          mergeMethod: "squash",
         },
         block: [],
       },
@@ -84,6 +85,11 @@ describe("parsePolicy: invalid policies", () => {
       name: "major in updateTypes",
       source: "version: 1\necosystems: [{ type: npm, directory: / }]\nautoMerge: { updateTypes: [major] }",
       path: "autoMerge.updateTypes[0]",
+    },
+    {
+      name: "unknown merge method",
+      source: "version: 1\necosystems: [{ type: npm, directory: / }]\nautoMerge: { mergeMethod: fast-forward }",
+      path: "autoMerge.mergeMethod",
     },
     {
       name: "block entry without a reason",
