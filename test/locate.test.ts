@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePolicy } from "../src/index.js";
+import { parsePolicy } from "../src/index.ts";
 
 /** Returns the source text each error points at, keyed by path. */
 function pointedAt(source: string) {

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
-import { generateAutoMergeWorkflow, parsePolicy, type Policy } from "../src/index.js";
+import { generateAutoMergeWorkflow, parsePolicy, type Policy } from "../src/index.ts";
 
 const examplePath = new URL("../examples/depbot.policy.yml", import.meta.url);
 const base = "version: 1\necosystems: [{ type: npm, directory: / }]";
