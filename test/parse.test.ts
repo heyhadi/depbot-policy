@@ -5,9 +5,10 @@ import { parsePolicy, type ParseResult } from "../src/index.js";
 const base = "version: 1\necosystems: [{ type: npm, directory: / }]";
 const examplePath = new URL("../examples/depbot.policy.yml", import.meta.url);
 
+// Locations are covered in locate.test.ts; these tests check paths and messages.
 function errorsOf(result: ParseResult) {
   if (result.ok) throw new Error("expected parsing to fail");
-  return result.errors;
+  return result.errors.map(({ location: _location, ...error }) => error);
 }
 
 describe("parsePolicy: valid policies", () => {
