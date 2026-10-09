@@ -1,2 +1,2 @@
-// Public API lands with the policy schema (milestone 1).
-export {};
+export { parsePolicy, type ParseResult, type PolicyError } from "./parse.js";
+export { policySchema, ecosystemTypes, type Policy } from "./schema.js";
