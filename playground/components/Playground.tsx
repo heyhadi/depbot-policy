@@ -18,7 +18,7 @@ export function Playground() {
   const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
   const editor = useRef<PolicyEditorHandle>(null);
   const dark = useDarkMode();
-  const { errors, files, stale } = usePolicy(source);
+  const { errors, files, stale, reviewer } = usePolicy(source);
 
   // Open a shared link's policy. The hash is only readable in the browser, hence the effect.
   useEffect(() => {
@@ -90,7 +90,17 @@ export function Playground() {
               ? "Copy the URL from the address bar"
               : "Share link"}
         </button>
-        <Status errorCount={errors.length} />
+        <div className="ml-auto flex items-center gap-3">
+          {reviewer && (
+            <p className="text-xs text-zinc-600 dark:text-zinc-400">
+              Reviewer this week:{" "}
+              <span className="font-mono font-medium text-zinc-900 dark:text-zinc-100">
+                @{reviewer}
+              </span>
+            </p>
+          )}
+          <Status errorCount={errors.length} />
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -124,7 +134,7 @@ function Status({ errorCount }: { errorCount: number }) {
   return (
     <p
       role="status"
-      className={`ml-auto inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
         errorCount === 0
           ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
           : "bg-red-50 text-red-800 dark:bg-red-950/50 dark:text-red-300"

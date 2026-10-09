@@ -20,6 +20,10 @@ function mergeStep(workflow: ReturnType<typeof workflowFor>) {
   return workflow.jobs["auto-merge"].steps[1];
 }
 
+function reviewStep(workflow: ReturnType<typeof workflowFor>) {
+  return workflow.jobs["auto-merge"].steps[2];
+}
+
 // These snapshot files are also linted by actionlint in CI.
 describe("generateAutoMergeWorkflow: snapshots", () => {
   it("example policy", async () => {
@@ -103,5 +107,29 @@ describe("generateAutoMergeWorkflow: content", () => {
 
     expect(step.run).not.toContain("${{");
     expect(step.env.PR_URL).toBe("${{ github.event.pull_request.html_url }}");
+  });
+
+  it("has no review step without a review rotation", () => {
+    expect(workflowFor(base).jobs["auto-merge"].steps).toHaveLength(2);
+  });
+
+  it("requests a review from the rotation only when the PR wasn't auto-merged", () => {
+    const workflow = workflowFor(`${base}\nreview: { rotation: [alice, bob] }`);
+
+    expect(mergeStep(workflow).id).toBe("auto-merge");
+    expect(reviewStep(workflow)).toMatchObject({
+      if: "steps.auto-merge.outcome == 'skipped'",
+      env: {
+        REVIEWERS: "alice bob",
+        PR_CREATED_AT: "${{ github.event.pull_request.created_at }}",
+      },
+    });
+    expect(reviewStep(workflow).run).toContain('gh pr edit "$PR_URL" --add-reviewer "$reviewer"');
+  });
+
+  it("keeps ${{ }} expressions out of the review script", () => {
+    const step = reviewStep(workflowFor(`${base}\nreview: { rotation: [alice] }`));
+
+    expect(step.run).not.toContain("${{");
   });
 });
