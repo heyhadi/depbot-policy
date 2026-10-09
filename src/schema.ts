@@ -19,18 +19,53 @@ export const ecosystemTypes = [
   "terraform",
 ] as const;
 
+// GitHub's username rules: alphanumerics and single hyphens, no leading/trailing hyphen, max 39 chars.
+const githubHandlePattern = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
+
+/** Flags every item whose key was already seen earlier in the array. */
+function unique<T>(key: (item: T) => string, describe: (item: T) => string) {
+  return (items: T[], ctx: z.RefinementCtx) => {
+    const firstIndexByKey = new Map<string, number>();
+    items.forEach((item, index) => {
+      const firstIndex = firstIndexByKey.get(key(item));
+      if (firstIndex === undefined) {
+        firstIndexByKey.set(key(item), index);
+        return;
+      }
+      ctx.addIssue({
+        code: "custom",
+        path: [index],
+        message: `${describe(item)} is already listed at index ${firstIndex}`,
+      });
+    });
+  };
+}
+
 const ecosystemSchema = z.strictObject({
   type: z.enum(ecosystemTypes),
-  directory: z.string().min(1),
+  directory: z
+    .string()
+    .startsWith("/", 'Must start with "/" (paths are relative to the repository root)'),
   schedule: z.enum(["daily", "weekly", "monthly"]).default("weekly"),
 });
 
-// Major updates are never auto-merged, so they aren't an option here.
+const updateTypeSchema = z.enum(["patch", "minor"], {
+  error: (issue) =>
+    issue.input === "major"
+      ? "Major updates are never auto-merged; they always need a human review"
+      : undefined,
+});
+
 const autoMergeSchema = z.strictObject({
-  updateTypes: z.array(z.enum(["patch", "minor"])).min(1).default(["patch"]),
+  updateTypes: z
+    .array(updateTypeSchema)
+    .min(1)
+    .superRefine(unique((type) => type, (type) => `"${type}"`))
+    .default(["patch"]),
   dependencyTypes: z
     .array(z.enum(["development", "production"]))
     .min(1)
+    .superRefine(unique((type) => type, (type) => `"${type}"`))
     .default(["development", "production"]),
 });
 
@@ -42,17 +77,39 @@ const blockEntrySchema = z.strictObject({
 });
 
 const reviewSchema = z.strictObject({
-  rotation: z.array(z.string().min(1)).min(1),
+  rotation: z
+    .array(
+      z.string().regex(githubHandlePattern, {
+        error: (issue) =>
+          typeof issue.input === "string" && issue.input.startsWith("@")
+            ? 'Write GitHub usernames without the leading "@"'
+            : "Not a valid GitHub username",
+      }),
+    )
+    .min(1)
+    // GitHub usernames are case-insensitive.
+    .superRefine(unique((handle) => handle.toLowerCase(), (handle) => `"${handle}"`)),
 });
 
 export const policySchema = z.strictObject({
   version: z.literal(1),
-  ecosystems: z.array(ecosystemSchema).min(1),
+  ecosystems: z
+    .array(ecosystemSchema)
+    .min(1)
+    .superRefine(
+      unique(
+        (ecosystem) => `${ecosystem.type}:${ecosystem.directory}`,
+        (ecosystem) => `${ecosystem.type} in "${ecosystem.directory}"`,
+      ),
+    ),
   autoMerge: autoMergeSchema.default({
     updateTypes: ["patch"],
     dependencyTypes: ["development", "production"],
   }),
-  block: z.array(blockEntrySchema).default([]),
+  block: z
+    .array(blockEntrySchema)
+    .superRefine(unique((entry) => entry.name, (entry) => `"${entry.name}"`))
+    .default([]),
   review: reviewSchema.optional(),
 });
 

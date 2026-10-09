@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parsePolicy, type ParseResult } from "../src/index.js";
 
+const base = "version: 1\necosystems: [{ type: npm, directory: / }]";
 const examplePath = new URL("../examples/depbot.policy.yml", import.meta.url);
 
 function errorsOf(result: ParseResult) {
@@ -100,12 +101,17 @@ describe("parsePolicy: invalid policies", () => {
     expect(errors.map((error) => error.path)).toContain(path);
   });
 
-  it("rejects unknown keys so typos are caught", () => {
+  it("reports each unknown key at its own path so typos are caught", () => {
     const errors = errorsOf(
-      parsePolicy("version: 1\necosystems: [{ type: npm, directory: / }]\nautomerge: {}"),
+      parsePolicy(
+        "version: 1\necosystems: [{ type: npm, directory: /, shedule: daily }]\nautomerge: {}",
+      ),
     );
 
-    expect(errors).toEqual([{ path: "", message: expect.stringContaining("automerge") }]);
+    expect(errors).toEqual([
+      { path: "ecosystems[0].shedule", message: "Unknown key" },
+      { path: "automerge", message: "Unknown key" },
+    ]);
   });
 
   it("reports every error, not just the first", () => {
@@ -133,7 +139,97 @@ describe("parsePolicy: invalid policies", () => {
     expect(errors[0]?.message).toMatch(/unique/i);
   });
 
-  it("rejects an empty document", () => {
-    expect(parsePolicy("").ok).toBe(false);
+  it.each(["", "# only a comment\n"])("rejects an empty document: %j", (source) => {
+    expect(errorsOf(parsePolicy(source))).toEqual([
+      { path: "", message: "Policy file is empty" },
+    ]);
+  });
+
+  it("says a missing field is required", () => {
+    const errors = errorsOf(parsePolicy(`${base}\nblock: [{ name: react }]`));
+
+    expect(errors).toEqual([{ path: "block[0].reason", message: "Required" }]);
+  });
+});
+
+describe("parsePolicy: policy rules", () => {
+  it.each([
+    {
+      name: "major updates are never auto-merged",
+      source: `${base}\nautoMerge: { updateTypes: [patch, major] }`,
+      error: {
+        path: "autoMerge.updateTypes[1]",
+        message: "Major updates are never auto-merged; they always need a human review",
+      },
+    },
+    {
+      name: "directory must be rooted",
+      source: "version: 1\necosystems: [{ type: npm, directory: api }]",
+      error: {
+        path: "ecosystems[0].directory",
+        message: 'Must start with "/" (paths are relative to the repository root)',
+      },
+    },
+    {
+      name: "duplicate ecosystem and directory",
+      source:
+        "version: 1\necosystems: [{ type: npm, directory: / }, { type: pip, directory: / }, { type: npm, directory: /, schedule: daily }]",
+      error: { path: "ecosystems[2]", message: 'npm in "/" is already listed at index 0' },
+    },
+    {
+      name: "duplicate update type",
+      source: `${base}\nautoMerge: { updateTypes: [patch, patch] }`,
+      error: { path: "autoMerge.updateTypes[1]", message: '"patch" is already listed at index 0' },
+    },
+    {
+      name: "duplicate dependency type",
+      source: `${base}\nautoMerge: { dependencyTypes: [production, production] }`,
+      error: {
+        path: "autoMerge.dependencyTypes[1]",
+        message: '"production" is already listed at index 0',
+      },
+    },
+    {
+      name: "duplicate block entry",
+      source: `${base}\nblock: [{ name: react, reason: a }, { name: react, reason: b }]`,
+      error: { path: "block[1]", message: '"react" is already listed at index 0' },
+    },
+    {
+      name: "invalid GitHub username",
+      source: `${base}\nreview: { rotation: [alice, -bob] }`,
+      error: { path: "review.rotation[1]", message: "Not a valid GitHub username" },
+    },
+    {
+      name: "username with a leading @",
+      source: `${base}\nreview: { rotation: ["@alice"] }`,
+      error: {
+        path: "review.rotation[0]",
+        message: 'Write GitHub usernames without the leading "@"',
+      },
+    },
+    {
+      name: "usernames that differ only by case",
+      source: `${base}\nreview: { rotation: [alice, Alice] }`,
+      error: { path: "review.rotation[1]", message: '"Alice" is already listed at index 0' },
+    },
+  ])("$name", ({ source, error }) => {
+    expect(errorsOf(parsePolicy(source))).toEqual([error]);
+  });
+
+  it("still reports duplicates when another item in the list is invalid", () => {
+    const errors = errorsOf(parsePolicy(`${base}\nreview: { rotation: [alice, alice, -bob] }`));
+
+    expect(errors.map((error) => error.path).sort()).toEqual([
+      "review.rotation[1]",
+      "review.rotation[2]",
+    ]);
+  });
+
+  it("allows the same ecosystem in different directories", () => {
+    const result = parsePolicy(
+      "version: 1\necosystems: [{ type: npm, directory: / }, { type: npm, directory: /web }]",
+    );
+
+    expect(result.ok).toBe(true);
   });
 });
