@@ -251,6 +251,22 @@ describe("parsePolicy: policy rules", () => {
     expect(errors.map((error) => error.path)).toEqual(["block"]);
   });
 
+  it.each([
+    ["yarn", 'Dependabot covers yarn under "npm"; use type: npm'],
+    ["poetry", 'Dependabot covers poetry under "pip"; use type: pip'],
+    ["cobol", /^Unknown ecosystem "cobol"\. Use one of: bundler, cargo, .*, terraform$/],
+  ])("explains an unknown ecosystem type: %s", (type, message) => {
+    const [error] = errorsOf(parsePolicy(`version: 1\necosystems: [{ type: ${type}, directory: / }]`));
+
+    expect(error?.message).toEqual(typeof message === "string" ? message : expect.stringMatching(message));
+  });
+
+  it("still says a missing ecosystem type is required", () => {
+    const errors = errorsOf(parsePolicy("version: 1\necosystems: [{ directory: / }]"));
+
+    expect(errors).toEqual([{ path: "ecosystems[0].type", message: "Required" }]);
+  });
+
   it("allows the same ecosystem in different directories", () => {
     const result = parsePolicy(
       "version: 1\necosystems: [{ type: npm, directory: / }, { type: npm, directory: /web }]",

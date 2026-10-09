@@ -52,9 +52,12 @@ export function parsePolicy(source: string): ParseResult {
   }
 
   const result = policySchema.safeParse(doc.toJS(), {
-    // Zod's default for a missing field is "expected string, received undefined".
+    // Zod's default for a missing field is "expected string, received undefined", or the list of
+    // allowed values for an enum.
     error: (issue) =>
-      issue.code === "invalid_type" && issue.input === undefined ? "Required" : undefined,
+      (issue.code === "invalid_type" || issue.code === "invalid_value") && issue.input === undefined
+        ? "Required"
+        : undefined,
   });
   if (!result.success) {
     return {
