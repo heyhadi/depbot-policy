@@ -1,0 +1,22 @@
+version: 1
+
+ecosystems:
+  - type: npm
+    directory: /
+    schedule: weekly
+  - type: github-actions
+    directory: /
+    schedule: monthly
+
+autoMerge:
+  updateTypes: [patch]
+  dependencyTypes: [development, production]
+
+block:
+  - name: react
+    reason: Pinned until the React 19 migration
+  - name: "@types/*"
+    reason: Type packages are updated together with their runtime package
+
+review:
+  rotation: [alice, bob, carol]
