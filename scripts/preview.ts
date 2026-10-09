@@ -8,7 +8,8 @@ const result = parsePolicy(readFileSync(path, "utf8"));
 
 if (!result.ok) {
   for (const error of result.errors) {
-    console.error(`${path}: ${error.path || "(file)"}: ${error.message}`);
+    const where = error.location ? `${path}:${error.location.line}:${error.location.column}` : path;
+    console.error(`${where}: ${error.path ? `${error.path}: ` : ""}${error.message}`);
   }
   process.exit(1);
 }
