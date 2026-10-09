@@ -110,6 +110,7 @@ Options:
   --dry-run         generate: print the files instead of writing them
   --describe <text> init: have Claude write the policy from a description
                     (needs ANTHROPIC_API_KEY)
+  --model <id>      init --describe: which Claude model to use (default: claude-opus-5-5)
   --force           init: overwrite an existing policy file
   --date <date>     reviewer: use this date instead of today (e.g. 2026-10-12)
   -h, --help        Show this help
@@ -173,7 +174,18 @@ Dependabot-only checks, no major auto-merges) don't depend on the model.
 
 **Details:**
 
-- It uses Claude Opus 5.5 at low effort. A policy typically costs about 1–4 US cents.
+- **Models:** pick one with `--model <id>` (or the Model menu in the playground). All run at low
+  effort, and costs are rough list-price estimates per policy:
+
+  | Model | `--model` | About |
+  |---|---|---|
+  | Claude Opus 5.5 (default) | `claude-opus-5-5` | 3–5¢, best balance of quality and cost |
+  | Claude Sonnet 5.5 | `claude-sonnet-5-5` | 2¢, faster and cheaper |
+  | Claude Haiku 5.5 | `claude-haiku-5-5` | well under 1¢, fastest and cheapest |
+  | Claude Fable 5.1 | `claude-fable-5-1` | 8–13¢, most capable |
+
+  Try a cheaper model first. This is a short, well-specified task, and every result is validated
+  and shown to you before it's used.
 - **Credentials:** the CLI reads `ANTHROPIC_API_KEY`, or a login from Anthropic's `ant` CLI.
 - **Privacy:** only your description is sent to Anthropic. The playground sends it straight from
   your browser, keeps your key in memory only, and forgets it when you leave the page.
@@ -441,7 +453,8 @@ Rules worth knowing:
 policy and see the generated files as you type.
 
 - **Describe with AI.** Describe your setup in plain words, paste your own Anthropic API key, and
-  Claude writes the policy into the editor, with notes on any assumptions it made. See
+  Claude writes the policy into the editor, with notes on any assumptions it made. You can choose
+  between four Claude models. See
   [Writing a policy with AI](#writing-a-policy-with-ai).
 - **Live validation.** Errors are underlined in the editor and listed below it in line order.
   Click one to jump to the exact text.
@@ -506,6 +519,7 @@ import { describePolicy } from "depbot-policy/describe";
 const { source, errors, notes } = await describePolicy(
   "npm project at the root; auto-merge patch updates",
   new Anthropic(), // reads ANTHROPIC_API_KEY
+  { model: "claude-sonnet-5-5" }, // optional; defaults to claude-opus-5-5
 );
 // source: policy YAML, errors: [] when valid, notes: Claude's assumptions
 ```
@@ -554,6 +568,7 @@ src/
   workflow.ts        Auto-merge workflow generator
   rotation.ts        Weekly reviewer: TypeScript formula and the workflow's shell version
   describe.ts        Write a policy from a description with Claude (depbot-policy/describe)
+  describe-models.ts The models it can use, kept free of the SDK so help text and UI can list them
   files.ts           generateFiles: every generated file and its path
   cli.ts, bin.ts     The depbot-policy command (bin.ts is the executable entry point)
   starter.ts         The policy written by `init`
@@ -580,7 +595,7 @@ depbot.policy.yml    This repository's own policy; .github/dependabot.yml and th
   and must pick the same person as `reviewerFor` on every test date.
 - **CLI:** every command runs against a real temporary directory.
 - **AI:** tests use a stand-in client, so they never call the API. They cover the request (model,
-  structured output format, refusal fallback), the repair loop, replies Claude can't use, and
+  structured output format, refusal fallback for each model), the repair loop, replies Claude can't use, and
   error messages.
 - **Playground:** unit tests for its logic, plus tests of the whole page with React Testing Library.
   CodeMirror can't run in jsdom, so the tests replace the two small editor components with plain
