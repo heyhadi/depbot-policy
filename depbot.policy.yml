@@ -1,0 +1,21 @@
+# This repository's own dependency policy, generated with its own CLI:
+#   npm run cli -- generate
+# CI fails if the generated files are out of date.
+version: 1
+
+ecosystems:
+  - type: npm
+    directory: /
+  - type: npm
+    directory: /playground
+  - type: github-actions
+    directory: /
+    schedule: monthly
+
+autoMerge:
+  updateTypes: [patch]
+  dependencyTypes: [development, production]
+  mergeMethod: squash
+
+review:
+  rotation: [heyhadi]

@@ -20,6 +20,20 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Check this repository's generated Dependabot files
+        run: npm run cli -- check
+
+      # Installs the packed tarball in an empty project and runs the CLI the way a user would.
+      - name: Smoke-test the published package
+        run: |
+          npm run build
+          npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          npm init -y > /dev/null
+          npm install "$RUNNER_TEMP"/depbot-policy-*.tgz
+          npx depbot-policy init
+          npx depbot-policy generate
+          npx depbot-policy check
 
       # Lints this repo's workflows and the generated ones. Tests fail if the snapshots
       # don't match the generator, so this lints the real output.
