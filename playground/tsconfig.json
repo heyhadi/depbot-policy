@@ -31,6 +31,9 @@
       ],
       "depbot-policy/describe": [
         "../src/describe.ts"
+      ],
+      "depbot-policy/describe-models": [
+        "../src/describe-models.ts"
       ]
     },
     "allowJs": true,

@@ -1,6 +1,12 @@
 "use client";
 
 import type { DescribeResult } from "depbot-policy/describe";
+import {
+  defaultDescribeModel,
+  describeModels,
+  isDescribeModelId,
+  type DescribeModelId,
+} from "depbot-policy/describe-models";
 import { useId, useState, type FormEvent } from "react";
 import { explainFailure, generatePolicy } from "@/lib/generatePolicy";
 
@@ -23,6 +29,7 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
   // Kept in memory only: every github.io project page shares one origin, so browser storage
   // would expose the key to other sites on it.
   const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState<DescribeModelId>(defaultDescribeModel);
   const [status, setStatus] = useState<Status>({ state: "idle" });
   const fieldId = useId();
   const loading = status.state === "loading";
@@ -31,7 +38,7 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
     event.preventDefault();
     setStatus({ state: "loading" });
     try {
-      const result = await generatePolicy(description, apiKey.trim());
+      const result = await generatePolicy(description, apiKey.trim(), model);
       onGenerated(result);
       setStatus({ state: "done", notes: result.notes, errorCount: result.errors.length });
     } catch (error) {
@@ -61,6 +68,26 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
         </div>
 
         <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-48 flex-col gap-1.5">
+            <label htmlFor={`${fieldId}-model`} className={labelClass}>
+              Model
+            </label>
+            <select
+              id={`${fieldId}-model`}
+              value={model}
+              onChange={(event) => {
+                if (isDescribeModelId(event.target.value)) setModel(event.target.value);
+              }}
+              aria-describedby={`${fieldId}-model-help`}
+              className={inputClass}
+            >
+              {describeModels.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="flex min-w-64 flex-1 flex-col gap-1.5">
             <label htmlFor={`${fieldId}-key`} className={labelClass}>
               Anthropic API key
@@ -87,9 +114,12 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
           </button>
         </div>
 
+        <p id={`${fieldId}-model-help`} className="text-xs text-zinc-600 dark:text-zinc-400">
+          {describeModels.find((option) => option.id === model)?.summary}, charged to your account.
+        </p>
         <p id={`${fieldId}-key-help`} className="text-xs text-zinc-500 dark:text-zinc-400">
           Your key goes straight from this browser to Anthropic and is forgotten when you leave the
-          page. Each policy costs about 1–4 cents on your account.{" "}
+          page.{" "}
           <a
             href="https://console.anthropic.com/settings/keys"
             className="underline underline-offset-2 hover:text-zinc-900 dark:hover:text-zinc-100"

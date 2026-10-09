@@ -13,6 +13,10 @@ export default defineConfig({
         find: /^depbot-policy\/describe$/,
         replacement: path.join(import.meta.dirname, "../src/describe.ts"),
       },
+      {
+        find: /^depbot-policy\/describe-models$/,
+        replacement: path.join(import.meta.dirname, "../src/describe-models.ts"),
+      },
     ],
   },
   test: {
