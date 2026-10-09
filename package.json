@@ -1,0 +1,22 @@
+{
+  "name": "depbot-policy",
+  "version": "0.0.0",
+  "description": "One policy file → dependabot.yml, patch-only auto-merge, block list, and review rotation",
+  "license": "MIT",
+  "author": "Munawirul Hadi",
+  "repository": "github:heyhadi/depbot-policy",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
