@@ -27,15 +27,30 @@ export function parsePolicy(source: string): ParseResult {
     };
   }
 
-  const result = policySchema.safeParse(doc.toJS());
+  if (doc.contents === null) {
+    return { ok: false, errors: [{ path: "", message: "Policy file is empty" }] };
+  }
+
+  const result = policySchema.safeParse(doc.toJS(), {
+    // Zod's default for a missing field is "expected string, received undefined".
+    error: (issue) =>
+      issue.code === "invalid_type" && issue.input === undefined ? "Required" : undefined,
+  });
   if (!result.success) {
-    return { ok: false, errors: result.error.issues.map(toPolicyError) };
+    return { ok: false, errors: result.error.issues.flatMap(toPolicyErrors) };
   }
   return { ok: true, policy: result.data };
 }
 
-function toPolicyError(issue: z.core.$ZodIssue): PolicyError {
-  return { path: formatPath(issue.path), message: issue.message };
+function toPolicyErrors(issue: z.core.$ZodIssue): PolicyError[] {
+  // Zod reports all unknown keys of an object as one issue on the object; point at each key instead.
+  if (issue.code === "unrecognized_keys") {
+    return issue.keys.map((key) => ({
+      path: formatPath([...issue.path, key]),
+      message: "Unknown key",
+    }));
+  }
+  return [{ path: formatPath(issue.path), message: issue.message }];
 }
 
 function formatPath(path: PropertyKey[]): string {
