@@ -1,0 +1,175 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { parseArgs } from "node:util";
+import { generateFiles } from "./files.ts";
+import { parsePolicy, type PolicyError } from "./parse.ts";
+import { reviewerFor } from "./rotation.ts";
+import type { Policy } from "./schema.ts";
+import { starterPolicy } from "./starter.ts";
+
+export interface CliIo {
+  cwd: string;
+  stdout: (text: string) => void;
+  stderr: (text: string) => void;
+}
+
+/** Exit codes: 0 success, 1 invalid policy or outdated files, 2 wrong usage. */
+export const exitCodes = { ok: 0, failed: 1, usage: 2 } as const;
+
+const defaultPolicyPath = "depbot.policy.yml";
+
+const usage = `Usage: depbot-policy <command> [options]
+
+Commands:
+  init        Create a starter ${defaultPolicyPath}
+  generate    Write .github/dependabot.yml and the auto-merge workflow
+  check       Fail if the policy is invalid or the generated files are out of date
+  reviewer    Print this week's reviewer from review.rotation
+
+Options:
+  --policy <file>   Policy file (default: ${defaultPolicyPath})
+  --out <dir>       Repository root to write to or check (default: .)
+  --dry-run         generate: print the files instead of writing them
+  --force           init: overwrite an existing policy file
+  --date <date>     reviewer: use this date instead of today (e.g. 2026-10-12)
+  -h, --help        Show this help
+  -v, --version     Show the version
+`;
+
+/** Runs the CLI and returns its exit code. Side effects go through `io` and the file system. */
+export function run(argv: readonly string[], io: CliIo): number {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      allowPositionals: true,
+      options: {
+        policy: { type: "string", default: defaultPolicyPath },
+        out: { type: "string", default: "." },
+        "dry-run": { type: "boolean", default: false },
+        force: { type: "boolean", default: false },
+        date: { type: "string" },
+        help: { type: "boolean", short: "h", default: false },
+        version: { type: "boolean", short: "v", default: false },
+      },
+    });
+  } catch (error) {
+    io.stderr(`${(error as Error).message}\n\n${usage}`);
+    return exitCodes.usage;
+  }
+
+  const { values, positionals } = parsed;
+  if (values.version) {
+    io.stdout(`${packageVersion()}\n`);
+    return exitCodes.ok;
+  }
+  const [command, ...extra] = positionals;
+  if (values.help || command === undefined) {
+    io.stdout(usage);
+    return exitCodes.ok;
+  }
+  if (extra.length > 0) {
+    io.stderr(`Unexpected argument: ${extra[0]}\n\n${usage}`);
+    return exitCodes.usage;
+  }
+
+  const policyPath = values.policy;
+  const resolve = (file: string) => path.resolve(io.cwd, file);
+
+  switch (command) {
+    case "init": {
+      if (existsSync(resolve(policyPath)) && !values.force) {
+        io.stderr(`${policyPath} already exists. Use --force to overwrite it.\n`);
+        return exitCodes.failed;
+      }
+      writeFileSync(resolve(policyPath), starterPolicy);
+      io.stdout(`Created ${policyPath}. Edit it, then run: depbot-policy generate\n`);
+      return exitCodes.ok;
+    }
+
+    case "generate": {
+      const policy = loadPolicy(policyPath, resolve, io);
+      if (policy === undefined) return exitCodes.failed;
+      for (const file of generateFiles(policy)) {
+        if (values["dry-run"]) {
+          io.stdout(`# ==> ${file.path} <==\n${file.contents}\n`);
+          continue;
+        }
+        const target = path.join(resolve(values.out), file.path);
+        mkdirSync(path.dirname(target), { recursive: true });
+        writeFileSync(target, file.contents);
+        io.stdout(`Wrote ${path.relative(io.cwd, target) || target}\n`);
+      }
+      return exitCodes.ok;
+    }
+
+    case "check": {
+      const policy = loadPolicy(policyPath, resolve, io);
+      if (policy === undefined) return exitCodes.failed;
+      const problems = generateFiles(policy).flatMap((file) => {
+        const target = path.join(resolve(values.out), file.path);
+        if (!existsSync(target)) return [`${file.path} is missing`];
+        return readFileSync(target, "utf8") === file.contents ? [] : [`${file.path} is out of date`];
+      });
+      if (problems.length > 0) {
+        for (const problem of problems) io.stderr(`${problem}\n`);
+        io.stderr("Run `depbot-policy generate` and commit the result.\n");
+        return exitCodes.failed;
+      }
+      io.stdout(`${policyPath} is valid and the generated files are up to date.\n`);
+      return exitCodes.ok;
+    }
+
+    case "reviewer": {
+      const policy = loadPolicy(policyPath, resolve, io);
+      if (policy === undefined) return exitCodes.failed;
+      if (policy.review === undefined) {
+        io.stderr(`${policyPath} has no review.rotation.\n`);
+        return exitCodes.failed;
+      }
+      const date = values.date === undefined ? new Date() : new Date(values.date);
+      if (Number.isNaN(date.getTime())) {
+        io.stderr(`Not a valid date: ${values.date}\n`);
+        return exitCodes.usage;
+      }
+      io.stdout(`${reviewerFor(policy.review.rotation, date)}\n`);
+      return exitCodes.ok;
+    }
+
+    default:
+      io.stderr(`Unknown command: ${command}\n\n${usage}`);
+      return exitCodes.usage;
+  }
+}
+
+function loadPolicy(
+  policyPath: string,
+  resolve: (file: string) => string,
+  io: CliIo,
+): Policy | undefined {
+  let source: string;
+  try {
+    source = readFileSync(resolve(policyPath), "utf8");
+  } catch {
+    io.stderr(`Can't read ${policyPath}. Create one with: depbot-policy init\n`);
+    return undefined;
+  }
+  const result = parsePolicy(source);
+  if (!result.ok) {
+    for (const error of result.errors) io.stderr(`${formatError(policyPath, error)}\n`);
+    return undefined;
+  }
+  return result.policy;
+}
+
+/** `file:line:column: path: message`, the format editors and CI annotations understand. */
+export function formatError(file: string, error: PolicyError): string {
+  const where = error.location ? `${file}:${error.location.line}:${error.location.column}` : file;
+  return `${where}: ${error.path ? `${error.path}: ` : ""}${error.message}`;
+}
+
+function packageVersion(): string {
+  // src/cli.ts and dist/cli.js are both one level below package.json.
+  const packageJson = new URL("../package.json", import.meta.url);
+  return (JSON.parse(readFileSync(packageJson, "utf8")) as { version: string }).version;
+}
