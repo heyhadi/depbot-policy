@@ -2,7 +2,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { exitCodes, run } from "../src/cli.ts";
+import { exitCodes, run, type CliIo } from "../src/cli.ts";
+import { DescribeError } from "../src/describe.ts";
 import { parsePolicy } from "../src/index.ts";
 import { starterPolicy } from "../src/starter.ts";
 
@@ -14,15 +15,19 @@ beforeEach(() => {
   cwd = mkdtempSync(path.join(tmpdir(), "depbot-cli-"));
   stdout = "";
   stderr = "";
+  fakeDescribe = undefined;
 });
 
 afterEach(() => rmSync(cwd, { recursive: true }));
 
-function cli(...argv: string[]): number {
+let fakeDescribe: CliIo["describe"];
+
+function cli(...argv: string[]): Promise<number> {
   return run(argv, {
     cwd,
     stdout: (text) => (stdout += text),
     stderr: (text) => (stderr += text),
+    ...(fakeDescribe && { describe: fakeDescribe }),
   });
 }
 
@@ -33,56 +38,56 @@ const validPolicy = "version: 1\necosystems: [{ type: npm, directory: / }]\nrevi
 const generatedPaths = [".github/dependabot.yml", ".github/workflows/dependabot-auto-merge.yml"];
 
 describe("init", () => {
-  it("writes a starter policy that is valid as-is", () => {
-    expect(cli("init")).toBe(exitCodes.ok);
+  it("writes a starter policy that is valid as-is", async () => {
+    expect(await cli("init")).toBe(exitCodes.ok);
 
     expect(read("depbot.policy.yml")).toBe(starterPolicy);
     expect(parsePolicy(starterPolicy).ok).toBe(true);
   });
 
-  it("refuses to overwrite an existing policy unless forced", () => {
+  it("refuses to overwrite an existing policy unless forced", async () => {
     write("depbot.policy.yml", "mine");
 
-    expect(cli("init")).toBe(exitCodes.failed);
+    expect(await cli("init")).toBe(exitCodes.failed);
     expect(read("depbot.policy.yml")).toBe("mine");
     expect(stderr).toContain("--force");
 
-    expect(cli("init", "--force")).toBe(exitCodes.ok);
+    expect(await cli("init", "--force")).toBe(exitCodes.ok);
     expect(read("depbot.policy.yml")).toBe(starterPolicy);
   });
 });
 
 describe("generate", () => {
-  it("writes both files, creating directories", () => {
+  it("writes both files, creating directories", async () => {
     write("depbot.policy.yml", validPolicy);
 
-    expect(cli("generate")).toBe(exitCodes.ok);
+    expect(await cli("generate")).toBe(exitCodes.ok);
 
     expect(read(".github/dependabot.yml")).toContain("package-ecosystem: npm");
     expect(read(".github/workflows/dependabot-auto-merge.yml")).toContain("gh pr merge --auto");
   });
 
-  it("supports a custom policy path and output directory", () => {
+  it("supports a custom policy path and output directory", async () => {
     write("custom.yml", validPolicy);
 
-    expect(cli("generate", "--policy", "custom.yml", "--out", "repo")).toBe(exitCodes.ok);
+    expect(await cli("generate", "--policy", "custom.yml", "--out", "repo")).toBe(exitCodes.ok);
 
     expect(existsSync(path.join(cwd, "repo/.github/dependabot.yml"))).toBe(true);
   });
 
-  it("prints instead of writing with --dry-run", () => {
+  it("prints instead of writing with --dry-run", async () => {
     write("depbot.policy.yml", validPolicy);
 
-    expect(cli("generate", "--dry-run")).toBe(exitCodes.ok);
+    expect(await cli("generate", "--dry-run")).toBe(exitCodes.ok);
 
     expect(stdout).toContain("# ==> .github/dependabot.yml <==");
     expect(existsSync(path.join(cwd, ".github"))).toBe(false);
   });
 
-  it("reports every error with file, line and column, and writes nothing", () => {
+  it("reports every error with file, line and column, and writes nothing", async () => {
     write("depbot.policy.yml", "version: 1\necosystems:\n  - type: yarn\n    directory: api\n");
 
-    expect(cli("generate")).toBe(exitCodes.failed);
+    expect(await cli("generate")).toBe(exitCodes.failed);
 
     expect(stderr.trim().split("\n")).toEqual([
       expect.stringMatching(/^depbot\.policy\.yml:3:5: ecosystems\[0\]\.type: /),
@@ -91,8 +96,8 @@ describe("generate", () => {
     expect(existsSync(path.join(cwd, ".github"))).toBe(false);
   });
 
-  it("explains how to start when there is no policy", () => {
-    expect(cli("generate")).toBe(exitCodes.failed);
+  it("explains how to start when there is no policy", async () => {
+    expect(await cli("generate")).toBe(exitCodes.failed);
 
     expect(stderr).toContain("depbot-policy init");
   });
@@ -101,23 +106,23 @@ describe("generate", () => {
 describe("check", () => {
   beforeEach(() => write("depbot.policy.yml", validPolicy));
 
-  it("passes when the generated files are up to date", () => {
-    cli("generate");
+  it("passes when the generated files are up to date", async () => {
+    await cli("generate");
 
-    expect(cli("check")).toBe(exitCodes.ok);
+    expect(await cli("check")).toBe(exitCodes.ok);
   });
 
-  it("fails when a file is missing", () => {
-    expect(cli("check")).toBe(exitCodes.failed);
+  it("fails when a file is missing", async () => {
+    expect(await cli("check")).toBe(exitCodes.failed);
 
     for (const file of generatedPaths) expect(stderr).toContain(`${file} is missing`);
   });
 
-  it("fails when a file was edited or the policy changed", () => {
-    cli("generate");
+  it("fails when a file was edited or the policy changed", async () => {
+    await cli("generate");
     write("depbot.policy.yml", validPolicy.replace("[alice, bob]", "[alice, bob, carol]"));
 
-    expect(cli("check")).toBe(exitCodes.failed);
+    expect(await cli("check")).toBe(exitCodes.failed);
 
     expect(stderr).toContain(".github/workflows/dependabot-auto-merge.yml is out of date");
     expect(stderr).not.toContain(".github/dependabot.yml");
@@ -125,41 +130,41 @@ describe("check", () => {
 });
 
 describe("reviewer", () => {
-  it("prints the reviewer for a given week", () => {
+  it("prints the reviewer for a given week", async () => {
     write("depbot.policy.yml", validPolicy);
 
-    cli("reviewer", "--date", "2026-10-05");
+    await cli("reviewer", "--date", "2026-10-05");
     const first = stdout.trim();
     stdout = "";
-    cli("reviewer", "--date", "2026-10-12");
+    await cli("reviewer", "--date", "2026-10-12");
 
     expect([first, stdout.trim()].sort()).toEqual(["alice", "bob"]);
   });
 
-  it("fails without a rotation", () => {
+  it("fails without a rotation", async () => {
     write("depbot.policy.yml", "version: 1\necosystems: [{ type: npm, directory: / }]\n");
 
-    expect(cli("reviewer")).toBe(exitCodes.failed);
+    expect(await cli("reviewer")).toBe(exitCodes.failed);
     expect(stderr).toContain("no review.rotation");
   });
 
-  it("rejects an invalid date", () => {
+  it("rejects an invalid date", async () => {
     write("depbot.policy.yml", validPolicy);
 
-    expect(cli("reviewer", "--date", "next tuesday")).toBe(exitCodes.usage);
+    expect(await cli("reviewer", "--date", "next tuesday")).toBe(exitCodes.usage);
   });
 });
 
 describe("usage", () => {
-  it.each([[[]], [["--help"]]])("prints help for %j", (argv) => {
-    expect(cli(...argv)).toBe(exitCodes.ok);
+  it.each([[[]], [["--help"]]])("prints help for %j", async (argv) => {
+    expect(await cli(...argv)).toBe(exitCodes.ok);
     expect(stdout).toContain("Usage: depbot-policy <command>");
   });
 
-  it("prints the package version", () => {
+  it("prints the package version", async () => {
     const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
-    expect(cli("--version")).toBe(exitCodes.ok);
+    expect(await cli("--version")).toBe(exitCodes.ok);
     expect(stdout.trim()).toBe(version);
   });
 
@@ -167,8 +172,70 @@ describe("usage", () => {
     ["an unknown command", ["deploy"]],
     ["an unknown option", ["generate", "--verbose"]],
     ["an extra argument", ["generate", "extra"]],
-  ])("exits with 2 for %s", (_, argv) => {
-    expect(cli(...argv)).toBe(exitCodes.usage);
+  ])("exits with 2 for %s", async (_, argv) => {
+    expect(await cli(...argv)).toBe(exitCodes.usage);
     expect(stderr).toContain("Usage:");
+  });
+});
+
+describe("init --describe", () => {
+  const described = "# Written by Claude from a description. Review it before committing.\n\nversion: 1\necosystems:\n  - type: npm\n    directory: /\n    schedule: weekly\n";
+
+  it("writes the policy Claude wrote and prints its notes", async () => {
+    fakeDescribe = async () => ({ source: described, errors: [], notes: ["Assumed a weekly schedule."] });
+
+    expect(await cli("init", "--describe", "npm project")).toBe(exitCodes.ok);
+
+    expect(read("depbot.policy.yml")).toBe(described);
+    expect(stdout).toContain("Note: Assumed a weekly schedule.");
+    expect(stdout).toContain("Review it, then run: depbot-policy generate");
+  });
+
+  it("passes the description through", async () => {
+    let received = "";
+    fakeDescribe = async (text) => {
+      received = text;
+      return { source: described, errors: [], notes: [] };
+    };
+
+    await cli("init", "--describe", "pnpm monorepo, pin react");
+
+    expect(received).toBe("pnpm monorepo, pin react");
+  });
+
+  it("still writes the file but fails when problems remain", async () => {
+    fakeDescribe = async () => ({
+      source: described,
+      errors: [{ path: "ecosystems[0].directory", message: "Must start with \"/\"", location: { start: 0, end: 1, line: 5, column: 5 } }],
+      notes: [],
+    });
+
+    expect(await cli("init", "--describe", "web app")).toBe(exitCodes.failed);
+
+    expect(existsSync(path.join(cwd, "depbot.policy.yml"))).toBe(true);
+    expect(stderr).toContain("depbot.policy.yml:5:5: ecosystems[0].directory");
+  });
+
+  it("explains a failure and writes nothing", async () => {
+    fakeDescribe = async () => {
+      throw new DescribeError("Claude declined to write a policy for this description.");
+    };
+
+    expect(await cli("init", "--describe", "npm")).toBe(exitCodes.failed);
+
+    expect(stderr).toContain("Claude declined");
+    expect(existsSync(path.join(cwd, "depbot.policy.yml"))).toBe(false);
+  });
+
+  it("doesn't overwrite an existing policy", async () => {
+    write("depbot.policy.yml", "mine");
+    fakeDescribe = async () => ({ source: described, errors: [], notes: [] });
+
+    expect(await cli("init", "--describe", "npm")).toBe(exitCodes.failed);
+    expect(read("depbot.policy.yml")).toBe("mine");
+  });
+
+  it("rejects an empty description", async () => {
+    expect(await cli("init", "--describe", "  ")).toBe(exitCodes.usage);
   });
 });
