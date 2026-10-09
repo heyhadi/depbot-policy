@@ -2,9 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
   DescribeError,
+  defaultDescribeModel,
   describeFailureMessage,
-  describeModel,
+  describeModels,
   describePolicy,
+  isDescribeModelId,
   draftToYaml,
   type PolicyDraft,
 } from "../src/describe.ts";
@@ -76,12 +78,43 @@ describe("describePolicy", () => {
 
     const request = parse.mock.calls[0]![0];
     expect(request).toMatchObject({
-      model: describeModel,
+      model: "claude-opus-5-5",
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       messages: [{ role: "user", content: "npm project" }],
       output_config: { effort: "low", format: { type: "json_schema" } },
     });
+  });
+
+  it.each(describeModels.map((model) => [model.id, model.serverSideFallback] as const))(
+    "uses %s, with server-side fallback: %s",
+    async (model, serverSideFallback) => {
+      const { client, parse } = fakeClient({ parsed_output: draft });
+
+      await describePolicy("npm project", client, { model });
+
+      const request = parse.mock.calls[0]![0];
+      expect(request.model).toBe(model);
+      if (serverSideFallback) {
+        expect(request).toMatchObject({ betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" });
+      } else {
+        expect(request).not.toHaveProperty("fallbacks");
+        expect(request).not.toHaveProperty("betas");
+      }
+    },
+  );
+
+  it("never sends fallbacks for Claude Haiku 5.5, which has no server-side fallback", () => {
+    expect(describeModels.find((model) => model.id === "claude-haiku-5-5")?.serverSideFallback).toBe(false);
+  });
+
+  it("uses the chosen model for the repair attempt too", async () => {
+    const broken = { ...draft, ecosystems: [{ type: "npm" as const, directory: "web", schedule: "weekly" as const }] };
+    const { client, parse } = fakeClient({ parsed_output: broken }, { parsed_output: draft });
+
+    await describePolicy("web app", client, { model: "claude-sonnet-5-5" });
+
+    expect(parse.mock.calls.map((call) => call[0].model)).toEqual(["claude-sonnet-5-5", "claude-sonnet-5-5"]);
   });
 
   it("sends validation errors back once and returns the repaired policy", async () => {
@@ -148,5 +181,16 @@ describe("describeFailureMessage", () => {
     [new Error("boom"), "Something went wrong while generating the policy."],
   ])("explains %s", (error, message) => {
     expect(describeFailureMessage(error)).toBe(message);
+  });
+});
+
+describe("describeModels", () => {
+  it("defaults to Claude Opus 5.5", () => {
+    expect(defaultDescribeModel).toBe("claude-opus-5-5");
+  });
+
+  it("recognises supported model ids only", () => {
+    expect(isDescribeModelId("claude-haiku-5-5")).toBe(true);
+    expect(isDescribeModelId("gpt-5")).toBe(false);
   });
 });

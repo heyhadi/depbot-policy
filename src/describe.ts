@@ -2,10 +2,21 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { Document, isScalar, visit } from "yaml";
 import { z } from "zod";
+import {
+  defaultDescribeModel,
+  describeModels,
+  type DescribeModelId,
+} from "./describe-models.ts";
 import { parsePolicy, type PolicyError } from "./parse.ts";
 import { ecosystemTypes } from "./schema.ts";
 
-export const describeModel = "claude-opus-5-5";
+export {
+  defaultDescribeModel,
+  describeModels,
+  isDescribeModelId,
+  type DescribeModel,
+  type DescribeModelId,
+} from "./describe-models.ts";
 
 /**
  * What Claude fills in. It's a simplified, refinement-free version of the policy schema, because
@@ -71,18 +82,28 @@ export class DescribeError extends Error {
   override name = "DescribeError";
 }
 
+export interface DescribeOptions {
+  /** Which Claude model writes the policy. Defaults to `defaultDescribeModel`. */
+  model?: DescribeModelId;
+}
+
 /**
  * Asks Claude to write a policy from a plain-language description, validates it with
  * `parsePolicy`, and gives Claude one chance to fix any errors.
  */
-export async function describePolicy(description: string, client: Anthropic): Promise<DescribeResult> {
-  const first = await requestDraft(client, description);
+export async function describePolicy(
+  description: string,
+  client: Anthropic,
+  { model = defaultDescribeModel }: DescribeOptions = {},
+): Promise<DescribeResult> {
+  const first = await requestDraft(client, model, description);
   const firstSource = draftToYaml(first);
   const firstResult = parsePolicy(firstSource);
   if (firstResult.ok) return { source: firstSource, errors: [], notes: first.notes };
 
   const repair = await requestDraft(
     client,
+    model,
     `${description}
 
 A previous attempt produced this policy, which fails validation:
@@ -98,10 +119,14 @@ Return a corrected draft.`,
   return { source, errors: result.ok ? [] : result.errors, notes: repair.notes };
 }
 
-async function requestDraft(client: Anthropic, content: string): Promise<PolicyDraft> {
+async function requestDraft(
+  client: Anthropic,
+  model: DescribeModelId,
+  content: string,
+): Promise<PolicyDraft> {
   let response;
   try {
-    response = await sendDraftRequest(client, content);
+    response = await sendDraftRequest(client, model, content);
   } catch (error) {
     // The SDK reports a reply that fails policyDraftSchema as a plain AnthropicError. API errors
     // (a subclass) and anything else, such as missing credentials, go to the caller unchanged.
@@ -123,13 +148,16 @@ async function requestDraft(client: Anthropic, content: string): Promise<PolicyD
   return response.parsed_output;
 }
 
-function sendDraftRequest(client: Anthropic, content: string) {
+function sendDraftRequest(client: Anthropic, model: DescribeModelId, content: string) {
+  const { serverSideFallback } = describeModels.find((candidate) => candidate.id === model)!;
   return client.beta.messages.parse({
-    model: describeModel,
+    model,
     max_tokens: 16000,
     // On a refusal, the API retries on a fallback model it picks for the refusal category.
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...(serverSideFallback && {
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default" as const,
+    }),
     system: systemPrompt,
     messages: [{ role: "user", content }],
     output_config: {

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { defaultDescribeModel, describeModels, isDescribeModelId, type DescribeModelId } from "./describe-models.ts";
 import type { DescribeResult } from "./describe.ts";
 import { generateFiles } from "./files.ts";
 import { parsePolicy, type PolicyError } from "./parse.ts";
@@ -13,7 +14,7 @@ export interface CliIo {
   stdout: (text: string) => void;
   stderr: (text: string) => void;
   /** Writes a policy from a description. Defaults to calling Claude; tests pass a stand-in. */
-  describe?: (description: string) => Promise<DescribeResult>;
+  describe?: (description: string, model: DescribeModelId) => Promise<DescribeResult>;
 }
 
 /** Exit codes: 0 success, 1 invalid policy or outdated files, 2 wrong usage. */
@@ -35,6 +36,8 @@ Options:
   --dry-run         generate: print the files instead of writing them
   --describe <text> init: have Claude write the policy from a description
                     (needs ANTHROPIC_API_KEY)
+  --model <id>      init --describe: which Claude model to use (default: ${defaultDescribeModel})
+${describeModels.map((model) => `                      ${model.id.padEnd(19)} ${model.summary}`).join("\n")}
   --force           init: overwrite an existing policy file
   --date <date>     reviewer: use this date instead of today (e.g. 2026-10-12)
   -h, --help        Show this help
@@ -54,6 +57,7 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
         "dry-run": { type: "boolean", default: false },
         force: { type: "boolean", default: false },
         describe: { type: "string" },
+        model: { type: "string" },
         date: { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false },
@@ -79,6 +83,11 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
     return exitCodes.usage;
   }
 
+  if (values.model !== undefined && values.describe === undefined) {
+    io.stderr("--model only applies to init --describe.\n");
+    return exitCodes.usage;
+  }
+
   const policyPath = values.policy;
   const resolve = (file: string) => path.resolve(io.cwd, file);
 
@@ -93,7 +102,7 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
         io.stdout(`Created ${policyPath}. Edit it, then run: depbot-policy generate\n`);
         return exitCodes.ok;
       }
-      return describeInto(policyPath, values.describe, resolve, io);
+      return describeInto(policyPath, values.describe, values.model, resolve, io);
     }
 
     case "generate": {
@@ -154,6 +163,7 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
 async function describeInto(
   policyPath: string,
   description: string,
+  modelOption: string | undefined,
   resolve: (file: string) => string,
   io: CliIo,
 ): Promise<number> {
@@ -163,14 +173,22 @@ async function describeInto(
   }
   // Loaded on demand, so the other commands never load the Anthropic SDK.
   const describeModule = await import("./describe.ts");
+  const model = modelOption ?? defaultDescribeModel;
+  if (!isDescribeModelId(model)) {
+    const ids = describeModels.map((candidate) => candidate.id).join(", ");
+    io.stderr(`Unknown model: ${model}. Use one of: ${ids}\n`);
+    return exitCodes.usage;
+  }
   const describe =
     io.describe ??
-    ((text: string) => describeModule.describePolicy(text, describeModule.environmentClient()));
+    ((text: string, chosen: DescribeModelId) =>
+      describeModule.describePolicy(text, describeModule.environmentClient(), { model: chosen }));
 
-  io.stdout("Asking Claude to write the policy...\n");
+  const { label } = describeModels.find((candidate) => candidate.id === model)!;
+  io.stdout(`Asking ${label} to write the policy...\n`);
   let result: DescribeResult;
   try {
-    result = await describe(description);
+    result = await describe(description, model);
   } catch (error) {
     io.stderr(`${describeModule.describeFailureMessage(error)}\n`);
     if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {

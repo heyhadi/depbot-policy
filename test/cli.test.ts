@@ -191,16 +191,44 @@ describe("init --describe", () => {
     expect(stdout).toContain("Review it, then run: depbot-policy generate");
   });
 
-  it("passes the description through", async () => {
-    let received = "";
-    fakeDescribe = async (text) => {
-      received = text;
+  it("passes the description through, with Claude Opus 5.5 by default", async () => {
+    let received: unknown[] = [];
+    fakeDescribe = async (...args) => {
+      received = args;
       return { source: described, errors: [], notes: [] };
     };
 
     await cli("init", "--describe", "pnpm monorepo, pin react");
 
-    expect(received).toBe("pnpm monorepo, pin react");
+    expect(received).toEqual(["pnpm monorepo, pin react", "claude-opus-5-5"]);
+    expect(stdout).toContain("Asking Claude Opus 5.5 to write the policy");
+  });
+
+  it("uses the model chosen with --model", async () => {
+    let model = "";
+    fakeDescribe = async (_, chosen) => {
+      model = chosen;
+      return { source: described, errors: [], notes: [] };
+    };
+
+    expect(await cli("init", "--describe", "npm", "--model", "claude-haiku-5-5")).toBe(exitCodes.ok);
+
+    expect(model).toBe("claude-haiku-5-5");
+    expect(stdout).toContain("Asking Claude Haiku 5.5");
+  });
+
+  it("rejects an unknown model and lists the supported ones", async () => {
+    expect(await cli("init", "--describe", "npm", "--model", "gpt-5")).toBe(exitCodes.usage);
+
+    expect(stderr).toContain("Unknown model: gpt-5");
+    expect(stderr).toContain("claude-sonnet-5-5");
+    expect(existsSync(path.join(cwd, "depbot.policy.yml"))).toBe(false);
+  });
+
+  it("rejects --model without --describe", async () => {
+    expect(await cli("generate", "--model", "claude-haiku-5-5")).toBe(exitCodes.usage);
+
+    expect(stderr).toContain("--model only applies to init --describe");
   });
 
   it("still writes the file but fails when problems remain", async () => {
