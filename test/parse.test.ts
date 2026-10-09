@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parsePolicy, type ParseResult } from "../src/index.js";
+import { parsePolicy, type ParseResult } from "../src/index.ts";
 
 const base = "version: 1\necosystems: [{ type: npm, directory: / }]";
 const examplePath = new URL("../examples/depbot.policy.yml", import.meta.url);

@@ -1,7 +1,7 @@
 // Dev-only preview until the CLI lands: validates a policy and prints every generated file.
 // Usage: npm run preview [-- path/to/depbot.policy.yml]
 import { readFileSync } from "node:fs";
-import { generateAutoMergeWorkflow, generateDependabotConfig, parsePolicy } from "../src/index.js";
+import { generateAutoMergeWorkflow, generateDependabotConfig, parsePolicy } from "../src/index.ts";
 
 const path = process.argv[2] ?? "examples/depbot.policy.yml";
 const result = parsePolicy(readFileSync(path, "utf8"));

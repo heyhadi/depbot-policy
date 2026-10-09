@@ -1,5 +1,5 @@
 import { Document, isScalar } from "yaml";
-import type { Policy } from "./schema.js";
+import type { Policy } from "./schema.ts";
 
 type Ecosystem = Policy["ecosystems"][number];
 type BlockEntry = Policy["block"][number];

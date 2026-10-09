@@ -1,4 +1,4 @@
-export { generateDependabotConfig } from "./dependabot.js";
-export { parsePolicy, type ParseResult, type PolicyError, type SourceLocation } from "./parse.js";
-export { policySchema, ecosystemTypes, type Policy } from "./schema.js";
-export { generateAutoMergeWorkflow } from "./workflow.js";
+export { generateDependabotConfig } from "./dependabot.ts";
+export { parsePolicy, type ParseResult, type PolicyError, type SourceLocation } from "./parse.ts";
+export { policySchema, ecosystemTypes, type Policy } from "./schema.ts";
+export { generateAutoMergeWorkflow } from "./workflow.ts";

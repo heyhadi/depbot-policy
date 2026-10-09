@@ -1,5 +1,5 @@
 import { Document, isScalar } from "yaml";
-import type { Policy } from "./schema.js";
+import type { Policy } from "./schema.ts";
 
 type AutoMerge = Policy["autoMerge"];
 

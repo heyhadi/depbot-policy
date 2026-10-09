@@ -1,7 +1,7 @@
 import { LineCounter, parseDocument } from "yaml";
 import type { z } from "zod";
-import { locate, type Span } from "./locate.js";
-import { policySchema, type Policy } from "./schema.js";
+import { locate, type Span } from "./locate.ts";
+import { policySchema, type Policy } from "./schema.ts";
 
 export interface PolicyError {
   /** Dotted path to the offending value, e.g. `ecosystems[0].type`. Empty for document-level errors. */
