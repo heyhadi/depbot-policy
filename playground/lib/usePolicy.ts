@@ -1,17 +1,11 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import {
-  generateAutoMergeWorkflow,
-  generateDependabotConfig,
+  generateFiles,
   parsePolicy,
   reviewerFor,
-  type Policy,
+  type GeneratedFile,
   type PolicyError,
 } from "depbot-policy";
-
-export interface GeneratedFile {
-  path: string;
-  contents: string;
-}
 
 export interface PolicyState {
   errors: PolicyError[];
@@ -21,16 +15,6 @@ export interface PolicyState {
   stale: boolean;
   /** This week's reviewer, when the policy is valid and has a review rotation. */
   reviewer: string | undefined;
-}
-
-export function generateFiles(policy: Policy): GeneratedFile[] {
-  return [
-    { path: ".github/dependabot.yml", contents: generateDependabotConfig(policy) },
-    {
-      path: ".github/workflows/dependabot-auto-merge.yml",
-      contents: generateAutoMergeWorkflow(policy),
-    },
-  ];
 }
 
 export function usePolicy(source: string): PolicyState {

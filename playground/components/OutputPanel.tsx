@@ -1,7 +1,7 @@
 "use client";
 
+import type { GeneratedFile } from "depbot-policy";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import type { GeneratedFile } from "@/lib/usePolicy";
 import { CodeViewer } from "./CodeViewer";
 
 interface OutputPanelProps {
