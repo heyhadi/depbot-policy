@@ -15,8 +15,10 @@ autoMerge:
 block:
   - name: react
     reason: Pinned until the React 19 migration
+    ecosystems: [npm]
   - name: "@types/*"
     reason: Type packages are updated together with their runtime package
+    ecosystems: [npm]
 
 review:
   rotation: [alice, bob, carol]

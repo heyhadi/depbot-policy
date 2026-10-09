@@ -74,6 +74,12 @@ const blockEntrySchema = z.strictObject({
   name: z.string().min(1),
   // Required so the block list explains itself and can be pruned later.
   reason: z.string().min(1),
+  // Limits the block to these ecosystems. Omitted means every ecosystem.
+  ecosystems: z
+    .array(z.enum(ecosystemTypes))
+    .min(1)
+    .superRefine(unique((type) => type, (type) => `"${type}"`))
+    .optional(),
 });
 
 const reviewSchema = z.strictObject({
@@ -111,6 +117,18 @@ export const policySchema = z.strictObject({
     .superRefine(unique((entry) => entry.name, (entry) => `"${entry.name}"`))
     .default([]),
   review: reviewSchema.optional(),
+}).superRefine((policy, ctx) => {
+  const configured = new Set(policy.ecosystems.map((ecosystem) => ecosystem.type));
+  policy.block.forEach((entry, blockIndex) => {
+    entry.ecosystems?.forEach((type, typeIndex) => {
+      if (configured.has(type)) return;
+      ctx.addIssue({
+        code: "custom",
+        path: ["block", blockIndex, "ecosystems", typeIndex],
+        message: `No "${type}" ecosystem is configured in this policy`,
+      });
+    });
+  });
 });
 
 /** A validated policy with defaults applied. */
