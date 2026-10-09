@@ -204,6 +204,21 @@ describe("init --describe", () => {
     expect(stdout).toContain("Asking Claude Opus 5.5 to write the policy");
   });
 
+  it("uses the Gemini model chosen with --model, and names Gemini in the key hint", async () => {
+    let model = "";
+    fakeDescribe = async (_, chosen) => {
+      model = chosen;
+      return { source: described, errors: [], notes: [] };
+    };
+
+    expect(await cli("init", "--describe", "npm", "--model", "gemini-3-flash-preview")).toBe(
+      exitCodes.ok,
+    );
+
+    expect(model).toBe("gemini-3-flash-preview");
+    expect(stdout).toContain("Asking Gemini 3 Flash to write the policy");
+  });
+
   it("uses the model chosen with --model", async () => {
     let model = "";
     fakeDescribe = async (_, chosen) => {
@@ -217,11 +232,47 @@ describe("init --describe", () => {
     expect(stdout).toContain("Asking Claude Haiku 5.5");
   });
 
+  it("runs a Gemini model and labels it Gemini", async () => {
+    let model = "";
+    fakeDescribe = async (_, chosen) => {
+      model = chosen;
+      return { source: described, errors: [], notes: [] };
+    };
+
+    expect(await cli("init", "--describe", "npm", "--model", "gemini-3-flash-preview")).toBe(
+      exitCodes.ok,
+    );
+
+    expect(model).toBe("gemini-3-flash-preview");
+    expect(stdout).toContain("Asking Gemini 3 Flash");
+    expect(read("depbot.policy.yml")).toBe(described);
+  });
+
+  it("hints at GEMINI_API_KEY when a Gemini model fails without one", async () => {
+    const saved = process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    fakeDescribe = async () => {
+      throw new DescribeError("Gemini declined to write a policy for this description.");
+    };
+
+    try {
+      expect(await cli("init", "--describe", "npm", "--model", "gemini-3-flash-preview")).toBe(
+        exitCodes.failed,
+      );
+
+      expect(stderr).toContain("Gemini declined");
+      expect(stderr).toContain("Set GEMINI_API_KEY to use --describe with a Gemini model.");
+    } finally {
+      if (saved !== undefined) process.env.GEMINI_API_KEY = saved;
+    }
+  });
+
   it("rejects an unknown model and lists the supported ones", async () => {
     expect(await cli("init", "--describe", "npm", "--model", "gpt-5")).toBe(exitCodes.usage);
 
     expect(stderr).toContain("Unknown model: gpt-5");
     expect(stderr).toContain("claude-sonnet-5-5");
+    expect(stderr).toContain("gemini-3-flash-preview");
     expect(existsSync(path.join(cwd, "depbot.policy.yml"))).toBe(false);
   });
 

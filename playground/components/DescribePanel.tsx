@@ -3,8 +3,11 @@
 import type { DescribeResult } from "depbot-policy/describe";
 import {
   defaultDescribeModel,
+  describeModel,
   describeModels,
   isDescribeModelId,
+  providerEnvVar,
+  providerLabel,
   type DescribeModelId,
 } from "depbot-policy/describe-models";
 import { useId, useState, type FormEvent } from "react";
@@ -24,6 +27,23 @@ type Status =
 const placeholder =
   "A pnpm monorepo with apps in /apps/web and /apps/api, plus Dockerfiles. Auto-merge patch updates to dev dependencies. Never update react until we migrate to 19. Alice and bob-smith take turns reviewing.";
 
+// Where to get a key and where it's sent, per provider. Everything else in the panel is derived
+// from the selected model's provider.
+const providerDetails = {
+  anthropic: {
+    keyUrl: "https://console.anthropic.com/settings/keys",
+    placeholder: "sk-ant-…",
+    host: "Anthropic",
+  },
+  google: {
+    keyUrl: "https://aistudio.google.com/apikey",
+    placeholder: "AIza…",
+    host: "Google",
+  },
+} as const;
+
+type ProviderDetails = (typeof providerDetails)[keyof typeof providerDetails];
+
 export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
   const [description, setDescription] = useState("");
   // Kept in memory only: every github.io project page shares one origin, so browser storage
@@ -33,6 +53,12 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
   const [status, setStatus] = useState<Status>({ state: "idle" });
   const fieldId = useId();
   const loading = status.state === "loading";
+
+  // Everything key-related follows whichever provider the chosen model runs on.
+  const selected = describeModel(model);
+  const provider = selected.provider;
+  const details: ProviderDetails = providerDetails[provider];
+  const writer = providerLabel(provider);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -81,16 +107,22 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
               aria-describedby={`${fieldId}-model-help`}
               className={inputClass}
             >
-              {describeModels.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
+              {(["anthropic", "google"] as const).map((group) => (
+                <optgroup key={group} label={group === "anthropic" ? "Claude" : "Gemini"}>
+                  {describeModels
+                    .filter((option) => option.provider === group)
+                    .map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                </optgroup>
               ))}
             </select>
           </div>
           <div className="flex min-w-64 flex-1 flex-col gap-1.5">
             <label htmlFor={`${fieldId}-key`} className={labelClass}>
-              Anthropic API key
+              {providerEnvVar(provider)} key
             </label>
             <input
               id={`${fieldId}-key`}
@@ -99,7 +131,7 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
               onChange={(event) => setApiKey(event.target.value)}
               autoComplete="off"
               spellCheck={false}
-              placeholder="sk-ant-…"
+              placeholder={details.placeholder}
               aria-describedby={`${fieldId}-key-help`}
               className={`${inputClass} font-mono`}
             />
@@ -118,10 +150,10 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
           {describeModels.find((option) => option.id === model)?.summary}, charged to your account.
         </p>
         <p id={`${fieldId}-key-help`} className="text-xs text-zinc-500 dark:text-zinc-400">
-          Your key goes straight from this browser to Anthropic and is forgotten when you leave the
-          page.{" "}
+          Your key goes straight from this browser to {details.host} and is forgotten when you leave
+          the page.{" "}
           <a
-            href="https://console.anthropic.com/settings/keys"
+            href={details.keyUrl}
             className="underline underline-offset-2 hover:text-zinc-900 dark:hover:text-zinc-100"
           >
             Get a key
@@ -138,11 +170,11 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
             <div className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
               <p>
                 {status.errorCount === 0
-                  ? "Claude wrote the policy below. Review it before using it."
-                  : `Claude wrote the policy below, but it still has ${status.errorCount === 1 ? "1 problem" : `${status.errorCount} problems`} to fix by hand.`}
+                  ? `${writer} wrote the policy below. Review it before using it.`
+                  : `${writer} wrote the policy below, but it still has ${status.errorCount === 1 ? "1 problem" : `${status.errorCount} problems`} to fix by hand.`}
               </p>
               {status.notes.length > 0 && (
-                <ul aria-label="Claude's notes" className="list-disc pl-5 text-zinc-600 dark:text-zinc-400">
+                <ul aria-label={`${writer}'s notes`} className="list-disc pl-5 text-zinc-600 dark:text-zinc-400">
                   {status.notes.map((note) => (
                     <li key={note}>{note}</li>
                   ))}

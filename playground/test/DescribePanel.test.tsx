@@ -21,6 +21,11 @@ vi.mock("@/components/CodeViewer", () => ({
 
 const written = "version: 1\necosystems:\n  - type: docker\n    directory: /\n    schedule: weekly\n";
 
+// The key field's label follows the selected model's provider: ANTHROPIC_API_KEY for Claude,
+// GEMINI_API_KEY for Gemini.
+const keyField = (provider: "anthropic" | "google") =>
+  screen.getByLabelText(`${provider === "anthropic" ? "ANTHROPIC_API_KEY" : "GEMINI_API_KEY"} key`);
+
 // Block body on purpose: a function returned from beforeEach runs as cleanup after each test.
 beforeEach(() => {
   vi.mocked(generatePolicy).mockReset();
@@ -49,7 +54,7 @@ describe("Describe with AI", () => {
     expect(submit).toBeDisabled();
     await user.type(screen.getByLabelText("Describe your setup"), "Docker only");
     expect(submit).toBeDisabled();
-    await user.type(screen.getByLabelText("Anthropic API key"), "sk-ant-test");
+    await user.type(keyField("anthropic"), "sk-ant-test");
     expect(submit).toBeEnabled();
   });
 
@@ -57,9 +62,9 @@ describe("Describe with AI", () => {
     const user = await openPanel();
     const setItem = vi.spyOn(Storage.prototype, "setItem");
 
-    await user.type(screen.getByLabelText("Anthropic API key"), "sk-ant-secret");
+    await user.type(keyField("anthropic"), "sk-ant-secret");
 
-    expect(screen.getByLabelText("Anthropic API key")).toHaveAttribute("type", "password");
+    expect(keyField("anthropic")).toHaveAttribute("type", "password");
     expect(setItem).not.toHaveBeenCalled();
   });
 
@@ -68,7 +73,7 @@ describe("Describe with AI", () => {
     const user = await openPanel();
 
     await user.type(screen.getByLabelText("Describe your setup"), "Docker only");
-    await user.type(screen.getByLabelText("Anthropic API key"), "  sk-ant-test  ");
+    await user.type(keyField("anthropic"), "  sk-ant-test  ");
     await user.click(screen.getByRole("button", { name: "Write policy" }));
 
     expect(generatePolicy).toHaveBeenCalledWith("Docker only", "sk-ant-test", "claude-opus-5-5");
@@ -84,12 +89,37 @@ describe("Describe with AI", () => {
 
     expect(picker).toHaveDisplayValue("Claude Opus 5.5");
     expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(
-      expect.arrayContaining(["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Claude Fable 5.1"]),
+      expect.arrayContaining([
+        "Claude Opus 5.5",
+        "Claude Sonnet 5.5",
+        "Claude Haiku 5.5",
+        "Claude Fable 5.1",
+        "Gemini 3 Pro",
+        "Gemini 3 Flash",
+      ]),
     );
     expect(screen.getByText(/about 3–5¢ per policy/)).toBeInTheDocument();
 
     await user.selectOptions(picker, "Claude Haiku 5.5");
     expect(screen.getByText(/well under 1¢ per policy/)).toBeInTheDocument();
+  });
+
+  it("groups the models by provider", async () => {
+    await openPanel();
+
+    const groups = screen.getAllByRole("group").map((group) => group.getAttribute("label"));
+    expect(groups).toEqual(["Claude", "Gemini"]);
+  });
+
+  it("switches the key field to Gemini when a Gemini model is chosen", async () => {
+    const user = await openPanel();
+
+    expect(keyField("anthropic")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Model"), "Gemini 3 Flash");
+
+    expect(screen.queryByLabelText("ANTHROPIC_API_KEY key")).not.toBeInTheDocument();
+    expect(keyField("google")).toHaveAttribute("placeholder", "AIza…");
+    expect(screen.getByText(/straight from this browser to Google/)).toBeInTheDocument();
   });
 
   it("generates with the chosen model", async () => {
@@ -98,10 +128,22 @@ describe("Describe with AI", () => {
 
     await user.selectOptions(screen.getByLabelText("Model"), "Claude Sonnet 5.5");
     await user.type(screen.getByLabelText("Describe your setup"), "Docker only");
-    await user.type(screen.getByLabelText("Anthropic API key"), "sk-ant-test");
+    await user.type(keyField("anthropic"), "sk-ant-test");
     await user.click(screen.getByRole("button", { name: "Write policy" }));
 
     expect(generatePolicy).toHaveBeenCalledWith("Docker only", "sk-ant-test", "claude-sonnet-5-5");
+  });
+
+  it("generates with a Gemini model once one is selected", async () => {
+    vi.mocked(generatePolicy).mockResolvedValue({ source: written, errors: [], notes: [] });
+    const user = await openPanel();
+
+    await user.selectOptions(screen.getByLabelText("Model"), "Gemini 3 Flash");
+    await user.type(screen.getByLabelText("Describe your setup"), "Docker only");
+    await user.type(keyField("google"), "AIza-test");
+    await user.click(screen.getByRole("button", { name: "Write policy" }));
+
+    expect(generatePolicy).toHaveBeenCalledWith("Docker only", "AIza-test", "gemini-3-flash-preview");
   });
 
   it("says when problems are left to fix by hand", async () => {
@@ -113,7 +155,7 @@ describe("Describe with AI", () => {
     const user = await openPanel();
 
     await user.type(screen.getByLabelText("Describe your setup"), "nothing");
-    await user.type(screen.getByLabelText("Anthropic API key"), "sk-ant-test");
+    await user.type(keyField("anthropic"), "sk-ant-test");
     await user.click(screen.getByRole("button", { name: "Write policy" }));
 
     expect(await screen.findByText(/still has 1 problem to fix by hand/)).toBeInTheDocument();
@@ -127,7 +169,7 @@ describe("Describe with AI", () => {
     const before = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Policy file" }).value;
 
     await user.type(screen.getByLabelText("Describe your setup"), "Docker only");
-    await user.type(screen.getByLabelText("Anthropic API key"), "sk-ant-wrong");
+    await user.type(keyField("anthropic"), "sk-ant-wrong");
     await user.click(screen.getByRole("button", { name: "Write policy" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("The API key was rejected");

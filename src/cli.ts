@@ -13,7 +13,7 @@ export interface CliIo {
   cwd: string;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
-  /** Writes a policy from a description. Defaults to calling Claude; tests pass a stand-in. */
+/** Writes a policy from a description. Defaults to calling the chosen provider; tests pass a stand-in. */
   describe?: (description: string, model: DescribeModelId) => Promise<DescribeResult>;
 }
 
@@ -22,10 +22,24 @@ export const exitCodes = { ok: 0, failed: 1, usage: 2 } as const;
 
 const defaultPolicyPath = "depbot.policy.yml";
 
+// The model list, grouped by provider, for the --model help. Each provider gets its own heading
+// so the two sets of models don't blur together.
+const modelHelp = (["anthropic", "google"] as const)
+  .map((provider) => {
+    const heading = provider === "anthropic" ? "Claude models:" : "Gemini models:";
+    return [
+      `                      ${heading}`,
+      ...describeModels
+        .filter((model) => model.provider === provider)
+        .map((model) => `                      ${model.id.padEnd(19)} ${model.summary}`),
+    ].join("\n");
+  })
+  .join("\n");
+
 const usage = `Usage: depbot-policy <command> [options]
 
 Commands:
-  init        Create a starter ${defaultPolicyPath}, or one written by Claude with --describe
+  init        Create a starter ${defaultPolicyPath}, or one written by AI with --describe
   generate    Write .github/dependabot.yml and the auto-merge workflow
   check       Fail if the policy is invalid or the generated files are out of date
   reviewer    Print this week's reviewer from review.rotation
@@ -34,10 +48,10 @@ Options:
   --policy <file>   Policy file (default: ${defaultPolicyPath})
   --out <dir>       Repository root to write to or check (default: .)
   --dry-run         generate: print the files instead of writing them
-  --describe <text> init: have Claude write the policy from a description
-                    (needs ANTHROPIC_API_KEY)
-  --model <id>      init --describe: which Claude model to use (default: ${defaultDescribeModel})
-${describeModels.map((model) => `                      ${model.id.padEnd(19)} ${model.summary}`).join("\n")}
+  --describe <text> init: have an AI model write the policy from a description
+                    (needs ANTHROPIC_API_KEY or GEMINI_API_KEY)
+  --model <id>      init --describe: which model to use (default: ${defaultDescribeModel})
+${modelHelp}
   --force           init: overwrite an existing policy file
   --date <date>     reviewer: use this date instead of today (e.g. 2026-10-12)
   -h, --help        Show this help
@@ -160,6 +174,11 @@ export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   }
 }
 
+/** The provider a model runs on, used to pick the client and the key hint. */
+function providerOf(model: DescribeModelId) {
+  return describeModels.find((candidate) => candidate.id === model)!.provider;
+}
+
 async function describeInto(
   policyPath: string,
   description: string,
@@ -182,7 +201,11 @@ async function describeInto(
   const describe =
     io.describe ??
     ((text: string, chosen: DescribeModelId) =>
-      describeModule.describePolicy(text, describeModule.environmentClient(), { model: chosen }));
+      describeModule.describePolicy(
+        text,
+        describeModule.environmentClient(providerOf(chosen)),
+        { model: chosen },
+      ));
 
   const { label } = describeModels.find((candidate) => candidate.id === model)!;
   io.stdout(`Asking ${label} to write the policy...\n`);
@@ -191,8 +214,17 @@ async function describeInto(
     result = await describe(description, model);
   } catch (error) {
     io.stderr(`${describeModule.describeFailureMessage(error)}\n`);
-    if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
-      io.stderr("Set ANTHROPIC_API_KEY (or log in with `ant auth login`) to use --describe.\n");
+    const provider = providerOf(model);
+    const keySet =
+      provider === "anthropic"
+        ? process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN
+        : process.env.GEMINI_API_KEY;
+    if (!keySet) {
+      io.stderr(
+        provider === "anthropic"
+          ? "Set ANTHROPIC_API_KEY (or log in with `ant auth login`) to use --describe.\n"
+          : "Set GEMINI_API_KEY to use --describe with a Gemini model.\n",
+      );
     }
     return exitCodes.failed;
   }
