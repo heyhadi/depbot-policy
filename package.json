@@ -13,7 +13,10 @@
   "bugs": "https://github.com/heyhadi/depbot-policy/issues",
   "license": "MIT",
   "author": "Munawirul Hadi",
-  "repository": "github:heyhadi/depbot-policy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/heyhadi/depbot-policy.git"
+  },
   "type": "module",
   "exports": {
     ".": {
