@@ -41,8 +41,32 @@ function unique<T>(key: (item: T) => string, describe: (item: T) => string) {
   };
 }
 
+// Package managers people often write that Dependabot covers under another ecosystem.
+const ecosystemAliases: Record<string, (typeof ecosystemTypes)[number]> = {
+  yarn: "npm",
+  pnpm: "npm",
+  bun: "npm",
+  poetry: "pip",
+  pipenv: "pip",
+  go: "gomod",
+  rust: "cargo",
+  ruby: "bundler",
+};
+
+const ecosystemTypeSchema = z.enum(ecosystemTypes, {
+  error: (issue) => {
+    // A schema-level error function overrides parsePolicy's "Required" mapping, so repeat it here.
+    if (issue.input === undefined) return "Required";
+    if (typeof issue.input !== "string") return undefined;
+    const alias = ecosystemAliases[issue.input.toLowerCase()];
+    return alias
+      ? `Dependabot covers ${issue.input} under "${alias}"; use type: ${alias}`
+      : `Unknown ecosystem "${issue.input}". Use one of: ${ecosystemTypes.join(", ")}`;
+  },
+});
+
 const ecosystemSchema = z.strictObject({
-  type: z.enum(ecosystemTypes),
+  type: ecosystemTypeSchema,
   directory: z
     .string()
     .startsWith("/", 'Must start with "/" (paths are relative to the repository root)'),
