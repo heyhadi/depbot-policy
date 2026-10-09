@@ -1,7 +1,7 @@
-// Dev-only preview until the CLI lands: validates a policy and prints the generated dependabot.yml.
+// Dev-only preview until the CLI lands: validates a policy and prints every generated file.
 // Usage: npm run preview [-- path/to/depbot.policy.yml]
 import { readFileSync } from "node:fs";
-import { generateDependabotConfig, parsePolicy } from "../src/index.js";
+import { generateAutoMergeWorkflow, generateDependabotConfig, parsePolicy } from "../src/index.js";
 
 const path = process.argv[2] ?? "examples/depbot.policy.yml";
 const result = parsePolicy(readFileSync(path, "utf8"));
@@ -13,4 +13,10 @@ if (!result.ok) {
   process.exit(1);
 }
 
-process.stdout.write(generateDependabotConfig(result.policy));
+const files = {
+  ".github/dependabot.yml": generateDependabotConfig(result.policy),
+  ".github/workflows/dependabot-auto-merge.yml": generateAutoMergeWorkflow(result.policy),
+};
+for (const [name, contents] of Object.entries(files)) {
+  process.stdout.write(`# ==> ${name} <==\n${contents}\n`);
+}
