@@ -5,10 +5,15 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: {
-      "@": import.meta.dirname,
-      "depbot-policy": path.join(import.meta.dirname, "../src/index.ts"),
-    },
+    // Exact matches, so "depbot-policy" doesn't also catch "depbot-policy/describe".
+    alias: [
+      { find: /^@\//, replacement: `${import.meta.dirname}/` },
+      { find: /^depbot-policy$/, replacement: path.join(import.meta.dirname, "../src/index.ts") },
+      {
+        find: /^depbot-policy\/describe$/,
+        replacement: path.join(import.meta.dirname, "../src/describe.ts"),
+      },
+    ],
   },
   test: {
     environment: "jsdom",
