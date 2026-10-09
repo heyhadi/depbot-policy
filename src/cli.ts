@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { defaultDescribeModel, describeModels, isDescribeModelId, type DescribeModelId } from "./describe-models.ts";
+import type { DescribeResult } from "./describe.ts";
 import { generateFiles } from "./files.ts";
 import { parsePolicy, type PolicyError } from "./parse.ts";
 import { reviewerFor } from "./rotation.ts";
@@ -11,6 +13,8 @@ export interface CliIo {
   cwd: string;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
+  /** Writes a policy from a description. Defaults to calling Claude; tests pass a stand-in. */
+  describe?: (description: string, model: DescribeModelId) => Promise<DescribeResult>;
 }
 
 /** Exit codes: 0 success, 1 invalid policy or outdated files, 2 wrong usage. */
@@ -21,7 +25,7 @@ const defaultPolicyPath = "depbot.policy.yml";
 const usage = `Usage: depbot-policy <command> [options]
 
 Commands:
-  init        Create a starter ${defaultPolicyPath}
+  init        Create a starter ${defaultPolicyPath}, or one written by Claude with --describe
   generate    Write .github/dependabot.yml and the auto-merge workflow
   check       Fail if the policy is invalid or the generated files are out of date
   reviewer    Print this week's reviewer from review.rotation
@@ -30,6 +34,10 @@ Options:
   --policy <file>   Policy file (default: ${defaultPolicyPath})
   --out <dir>       Repository root to write to or check (default: .)
   --dry-run         generate: print the files instead of writing them
+  --describe <text> init: have Claude write the policy from a description
+                    (needs ANTHROPIC_API_KEY)
+  --model <id>      init --describe: which Claude model to use (default: ${defaultDescribeModel})
+${describeModels.map((model) => `                      ${model.id.padEnd(19)} ${model.summary}`).join("\n")}
   --force           init: overwrite an existing policy file
   --date <date>     reviewer: use this date instead of today (e.g. 2026-10-12)
   -h, --help        Show this help
@@ -37,7 +45,7 @@ Options:
 `;
 
 /** Runs the CLI and returns its exit code. Side effects go through `io` and the file system. */
-export function run(argv: readonly string[], io: CliIo): number {
+export async function run(argv: readonly string[], io: CliIo): Promise<number> {
   let parsed;
   try {
     parsed = parseArgs({
@@ -48,6 +56,8 @@ export function run(argv: readonly string[], io: CliIo): number {
         out: { type: "string", default: "." },
         "dry-run": { type: "boolean", default: false },
         force: { type: "boolean", default: false },
+        describe: { type: "string" },
+        model: { type: "string" },
         date: { type: "string" },
         help: { type: "boolean", short: "h", default: false },
         version: { type: "boolean", short: "v", default: false },
@@ -73,6 +83,11 @@ export function run(argv: readonly string[], io: CliIo): number {
     return exitCodes.usage;
   }
 
+  if (values.model !== undefined && values.describe === undefined) {
+    io.stderr("--model only applies to init --describe.\n");
+    return exitCodes.usage;
+  }
+
   const policyPath = values.policy;
   const resolve = (file: string) => path.resolve(io.cwd, file);
 
@@ -82,9 +97,12 @@ export function run(argv: readonly string[], io: CliIo): number {
         io.stderr(`${policyPath} already exists. Use --force to overwrite it.\n`);
         return exitCodes.failed;
       }
-      writeFileSync(resolve(policyPath), starterPolicy);
-      io.stdout(`Created ${policyPath}. Edit it, then run: depbot-policy generate\n`);
-      return exitCodes.ok;
+      if (values.describe === undefined) {
+        writeFileSync(resolve(policyPath), starterPolicy);
+        io.stdout(`Created ${policyPath}. Edit it, then run: depbot-policy generate\n`);
+        return exitCodes.ok;
+      }
+      return describeInto(policyPath, values.describe, values.model, resolve, io);
     }
 
     case "generate": {
@@ -140,6 +158,54 @@ export function run(argv: readonly string[], io: CliIo): number {
       io.stderr(`Unknown command: ${command}\n\n${usage}`);
       return exitCodes.usage;
   }
+}
+
+async function describeInto(
+  policyPath: string,
+  description: string,
+  modelOption: string | undefined,
+  resolve: (file: string) => string,
+  io: CliIo,
+): Promise<number> {
+  if (description.trim() === "") {
+    io.stderr("--describe needs a description, e.g. --describe \"pnpm monorepo, auto-merge patches\"\n");
+    return exitCodes.usage;
+  }
+  // Loaded on demand, so the other commands never load the Anthropic SDK.
+  const describeModule = await import("./describe.ts");
+  const model = modelOption ?? defaultDescribeModel;
+  if (!isDescribeModelId(model)) {
+    const ids = describeModels.map((candidate) => candidate.id).join(", ");
+    io.stderr(`Unknown model: ${model}. Use one of: ${ids}\n`);
+    return exitCodes.usage;
+  }
+  const describe =
+    io.describe ??
+    ((text: string, chosen: DescribeModelId) =>
+      describeModule.describePolicy(text, describeModule.environmentClient(), { model: chosen }));
+
+  const { label } = describeModels.find((candidate) => candidate.id === model)!;
+  io.stdout(`Asking ${label} to write the policy...\n`);
+  let result: DescribeResult;
+  try {
+    result = await describe(description, model);
+  } catch (error) {
+    io.stderr(`${describeModule.describeFailureMessage(error)}\n`);
+    if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
+      io.stderr("Set ANTHROPIC_API_KEY (or log in with `ant auth login`) to use --describe.\n");
+    }
+    return exitCodes.failed;
+  }
+
+  writeFileSync(resolve(policyPath), result.source);
+  for (const note of result.notes) io.stdout(`Note: ${note}\n`);
+  if (result.errors.length > 0) {
+    io.stderr(`Created ${policyPath}, but it still has problems to fix by hand:\n`);
+    for (const error of result.errors) io.stderr(`${formatError(policyPath, error)}\n`);
+    return exitCodes.failed;
+  }
+  io.stdout(`Created ${policyPath}. Review it, then run: depbot-policy generate\n`);
+  return exitCodes.ok;
 }
 
 function loadPolicy(

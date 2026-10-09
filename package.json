@@ -22,6 +22,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./describe": {
+      "types": "./dist/describe.d.ts",
+      "default": "./dist/describe.js"
     }
   },
   "bin": {
@@ -41,6 +45,7 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },

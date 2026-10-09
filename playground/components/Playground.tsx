@@ -1,11 +1,13 @@
 "use client";
 
 import type { PolicyError } from "depbot-policy";
+import type { DescribeResult } from "depbot-policy/describe";
 import { useEffect, useRef, useState } from "react";
 import { presets } from "@/lib/presets";
 import { readSharedPolicy, shareUrl } from "@/lib/share";
 import { useDarkMode } from "@/lib/useDarkMode";
 import { usePolicy } from "@/lib/usePolicy";
+import { DescribePanel } from "./DescribePanel";
 import { ErrorList } from "./ErrorList";
 import { OutputPanel } from "./OutputPanel";
 import { PolicyEditor, type PolicyEditorHandle } from "./PolicyEditor";
@@ -16,6 +18,7 @@ export function Playground() {
   const [source, setSource] = useState(defaultSource);
   const [preset, setPreset] = useState(presets[0]!.id);
   const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
+  const [describeOpen, setDescribeOpen] = useState(false);
   const editor = useRef<PolicyEditorHandle>(null);
   const dark = useDarkMode();
   const { errors, files, stale, reviewer } = usePolicy(source);
@@ -57,6 +60,11 @@ export function Playground() {
     }
   }
 
+  function onGenerated(result: DescribeResult) {
+    setSource(result.source);
+    setPreset("");
+  }
+
   function reveal(error: PolicyError) {
     if (error.location) editor.current?.reveal(error.location.start, error.location.end);
   }
@@ -81,8 +89,17 @@ export function Playground() {
         </label>
         <button
           type="button"
+          onClick={() => setDescribeOpen((open) => !open)}
+          aria-expanded={describeOpen}
+          aria-controls="describe-panel"
+          className={`${toolbarButton} ${describeOpen ? "border-emerald-600 text-emerald-700 dark:border-emerald-500 dark:text-emerald-300" : ""}`}
+        >
+          Describe with AI
+        </button>
+        <button
+          type="button"
           onClick={share}
-          className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-emerald-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className={toolbarButton}
         >
           {shareState === "copied"
             ? "Link copied"
@@ -102,6 +119,8 @@ export function Playground() {
           <Status errorCount={errors.length} />
         </div>
       </div>
+
+      {describeOpen && <DescribePanel id="describe-panel" onGenerated={onGenerated} />}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section aria-label="Policy" className={panel}>
@@ -149,6 +168,8 @@ function Status({ errorCount }: { errorCount: number }) {
   );
 }
 
+const toolbarButton =
+  "rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-emerald-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800";
 const panel =
   "flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm lg:h-[calc(100dvh-13rem)] lg:min-h-[32rem] dark:border-zinc-800 dark:bg-zinc-900";
 const panelHeading =

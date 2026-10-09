@@ -39,6 +39,7 @@ npx depbot-policy generate
 - [Why](#why)
 - [Quick start](#quick-start)
 - [CLI](#cli)
+- [Writing a policy with AI](#writing-a-policy-with-ai)
 - [Policy reference](#policy-reference)
 - [What gets generated](#what-gets-generated)
 - [Repository setup](#repository-setup)
@@ -86,6 +87,9 @@ git commit -m "Manage Dependabot with depbot-policy"
 
 Then do the one-time [repository setup](#repository-setup), so that auto-merge waits for CI.
 
+Prefer to describe what you want? `npx depbot-policy init --describe "…"` has Claude write the
+policy for you. See [Writing a policy with AI](#writing-a-policy-with-ai).
+
 To change anything later, edit `depbot.policy.yml` and run `npx depbot-policy generate` again.
 Don't edit the generated files by hand. [`check`](#keeping-files-in-sync-in-ci) catches that.
 
@@ -95,7 +99,7 @@ Don't edit the generated files by hand. [`check`](#keeping-files-in-sync-in-ci) 
 depbot-policy <command> [options]
 
 Commands:
-  init        Create a starter depbot.policy.yml
+  init        Create a starter depbot.policy.yml, or one written by Claude with --describe
   generate    Write .github/dependabot.yml and the auto-merge workflow
   check       Fail if the policy is invalid or the generated files are out of date
   reviewer    Print this week's reviewer from review.rotation
@@ -104,6 +108,9 @@ Options:
   --policy <file>   Policy file (default: depbot.policy.yml)
   --out <dir>       Repository root to write to or check (default: .)
   --dry-run         generate: print the files instead of writing them
+  --describe <text> init: have Claude write the policy from a description
+                    (needs ANTHROPIC_API_KEY)
+  --model <id>      init --describe: which Claude model to use (default: claude-opus-5-5)
   --force           init: overwrite an existing policy file
   --date <date>     reviewer: use this date instead of today (e.g. 2026-10-12)
   -h, --help        Show this help
@@ -113,7 +120,7 @@ Options:
 | Command | Exit code |
 |---|---|
 | Success | `0` |
-| Invalid policy, or `check` found missing or outdated files | `1` |
+| Invalid policy, `check` found missing or outdated files, or `--describe` failed | `1` |
 | Wrong usage (unknown command or option, bad `--date`) | `2` |
 
 Examples:
@@ -127,6 +134,64 @@ npx depbot-policy reviewer --date 2026-12-28         # ...and in the last week o
 
 You can also install it as a dev dependency (`npm install --save-dev depbot-policy`) and call
 `depbot-policy` from npm scripts.
+
+## Writing a policy with AI
+
+Describe your setup in plain words and let Claude write the policy:
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...
+npx depbot-policy init --describe "pnpm monorepo with apps in /apps/web and /apps/api, \
+  plus Dockerfiles. Auto-merge patch updates to dev dependencies. Never update react \
+  until we migrate to 19. alice and bob-smith take turns reviewing."
+```
+
+Example output (Claude's notes vary):
+
+```text
+Asking Claude to write the policy...
+Note: Assumed a weekly schedule, since none was given.
+Created depbot.policy.yml. Review it, then run: depbot-policy generate
+```
+
+The [playground](#web-playground) has the same feature under **Describe with AI**.
+
+**How it works.** Claude only writes the *policy*. It never writes the workflow or
+`dependabot.yml`.
+
+1. Claude fills in a simplified version of the policy schema, using
+   [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), and
+   adds short notes about any assumptions it made.
+2. depbot-policy turns that into YAML and validates it with the same rules as a hand-written
+   policy.
+3. If anything fails validation, the errors go back to Claude once to fix. Anything still wrong is
+   reported with its line and column, like any other policy error.
+4. You review the policy. `generate` then produces the files with the same deterministic code as
+   always.
+
+So the safety properties of the generated workflow (pinned actions, minimal permissions, the
+Dependabot-only checks, no major auto-merges) don't depend on the model.
+
+**Details:**
+
+- **Models:** pick one with `--model <id>` (or the Model menu in the playground). All run at low
+  effort, and costs are rough list-price estimates per policy:
+
+  | Model | `--model` | About |
+  |---|---|---|
+  | Claude Opus 5.5 (default) | `claude-opus-5-5` | 3–5¢, best balance of quality and cost |
+  | Claude Sonnet 5.5 | `claude-sonnet-5-5` | 2¢, faster and cheaper |
+  | Claude Haiku 5.5 | `claude-haiku-5-5` | well under 1¢, fastest and cheapest |
+  | Claude Fable 5.1 | `claude-fable-5-1` | 8–13¢, most capable |
+
+  Try a cheaper model first. This is a short, well-specified task, and every result is validated
+  and shown to you before it's used.
+- **Credentials:** the CLI reads `ANTHROPIC_API_KEY`, or a login from Anthropic's `ant` CLI.
+- **Privacy:** only your description is sent to Anthropic. The playground sends it straight from
+  your browser, keeps your key in memory only, and forgets it when you leave the page.
+- **Exit codes:** if Claude declines, or the result still has errors after the repair attempt,
+  `init --describe` exits with `1`. If there are remaining errors, it still writes the file so you
+  can fix them by hand.
 
 ## Policy reference
 
@@ -387,6 +452,10 @@ Rules worth knowing:
 **[heyhadi.github.io/depbot-policy](https://heyhadi.github.io/depbot-policy/)** lets you write a
 policy and see the generated files as you type.
 
+- **Describe with AI.** Describe your setup in plain words, paste your own Anthropic API key, and
+  Claude writes the policy into the editor, with notes on any assumptions it made. You can choose
+  between four Claude models. See
+  [Writing a policy with AI](#writing-a-policy-with-ai).
 - **Live validation.** Errors are underlined in the editor and listed below it in line order.
   Click one to jump to the exact text.
 - **Generated files in tabs**, with Copy and Download buttons. While the policy has errors, the
@@ -440,6 +509,21 @@ if (!result.ok) {
 Everything is pure: no file system, network or global state. That's what lets the same code run in
 the CLI, in tests and in the browser.
 
+To write a policy from a description, import from `depbot-policy/describe`. It's a separate entry
+point, so the core library never loads the Anthropic SDK:
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+import { describePolicy } from "depbot-policy/describe";
+
+const { source, errors, notes } = await describePolicy(
+  "npm project at the root; auto-merge patch updates",
+  new Anthropic(), // reads ANTHROPIC_API_KEY
+  { model: "claude-sonnet-5-5" }, // optional; defaults to claude-opus-5-5
+);
+// source: policy YAML, errors: [] when valid, notes: Claude's assumptions
+```
+
 ## Development
 
 Requires Node 22 or newer (see [`.nvmrc`](.nvmrc)). Node runs the TypeScript source directly
@@ -483,6 +567,8 @@ src/
   dependabot.ts      dependabot.yml generator
   workflow.ts        Auto-merge workflow generator
   rotation.ts        Weekly reviewer: TypeScript formula and the workflow's shell version
+  describe.ts        Write a policy from a description with Claude (depbot-policy/describe)
+  describe-models.ts The models it can use, kept free of the SDK so help text and UI can list them
   files.ts           generateFiles: every generated file and its path
   cli.ts, bin.ts     The depbot-policy command (bin.ts is the executable entry point)
   starter.ts         The policy written by `init`
@@ -508,6 +594,9 @@ depbot.policy.yml    This repository's own policy; .github/dependabot.yml and th
 - **Rotation:** the workflow's shell script runs in bash, with stand-in `date` and `gh` commands,
   and must pick the same person as `reviewerFor` on every test date.
 - **CLI:** every command runs against a real temporary directory.
+- **AI:** tests use a stand-in client, so they never call the API. They cover the request (model,
+  structured output format, refusal fallback for each model), the repair loop, replies Claude can't use, and
+  error messages.
 - **Playground:** unit tests for its logic, plus tests of the whole page with React Testing Library.
   CodeMirror can't run in jsdom, so the tests replace the two small editor components with plain
   elements.
@@ -570,6 +659,9 @@ Short versions of the main decisions. The pull requests have the full reasoning.
   browser.
 - **Generated YAML via the `yaml` document API**, not string templates. The library handles quoting
   (`"@types/*"` must be quoted) and comments.
+- **AI writes the policy, never the workflow.** Claude handles what needs judgment (understanding a
+  description). Validation and generation stay deterministic, so a bad model reply can't weaken
+  the security properties.
 - **Stateless rotation.** The reviewer is a function of the week, so there's nothing to store, sync
   or get out of date.
 - **Pinned actions.** Actions are referenced by commit SHA with a `# vX.Y.Z` comment, both in the
