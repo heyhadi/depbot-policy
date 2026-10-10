@@ -32,7 +32,6 @@ async function openPanel() {
   await user.click(screen.getByRole("button", { name: "Describe with AI" }));
   return user;
 }
-
 describe("Describe with AI", () => {
   it("is hidden until opened", async () => {
     render(<Playground />);
@@ -78,13 +77,34 @@ describe("Describe with AI", () => {
     expect(screen.getByLabelText("Start from")).toHaveDisplayValue("Your policy");
   });
 
+  it("puts Gemini's policy in the editor when a Gemini model is chosen", async () => {
+    vi.mocked(generatePolicy).mockResolvedValue({ source: written, errors: [], notes: ["Assumed weekly."] });
+    const user = await openPanel();
+
+    await user.selectOptions(screen.getByLabelText("Model"), "Gemini 3 Flash");
+    await user.type(screen.getByLabelText("Describe your setup"), "Docker only");
+    await user.type(screen.getByLabelText("Gemini API key"), "  g-test  ");
+    await user.click(screen.getByRole("button", { name: "Write policy" }));
+
+    expect(generatePolicy).toHaveBeenCalledWith("Docker only", "g-test", "gemini-3-flash-preview");
+    expect(await screen.findByText(/Gemini wrote the policy below/)).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Gemini's notes" })).toHaveTextContent("Assumed weekly.");
+  });
+
   it("offers every model, defaults to Claude Opus 5.5, and shows the chosen one's cost", async () => {
     const user = await openPanel();
     const picker = screen.getByLabelText("Model");
 
     expect(picker).toHaveDisplayValue("Claude Opus 5.5");
     expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(
-      expect.arrayContaining(["Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Haiku 5.5", "Claude Fable 5.1"]),
+      expect.arrayContaining([
+        "Claude Opus 5.5",
+        "Claude Sonnet 5.5",
+        "Claude Haiku 5.5",
+        "Claude Fable 5.1",
+        "Gemini 3.1 Pro",
+        "Gemini 3 Flash",
+      ]),
     );
     expect(screen.getByText(/about 3–5¢ per policy/)).toBeInTheDocument();
 
