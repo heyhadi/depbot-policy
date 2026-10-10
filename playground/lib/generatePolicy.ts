@@ -1,16 +1,16 @@
 import type { DescribeModelId, DescribeResult } from "depbot-policy/describe";
 
-// The Anthropic SDK is loaded only when someone generates a policy, not on page load.
+// The provider SDKs are loaded only when someone generates a policy, not on page load.
 const loadDescribe = () => import("depbot-policy/describe");
 
-/** Asks Claude, with the visitor's own API key, to write a policy from a description. */
+/** Asks the chosen model (Claude or Gemini), with the visitor's own API key, to write a policy. */
 export async function generatePolicy(
   description: string,
   apiKey: string,
   model: DescribeModelId,
 ): Promise<DescribeResult> {
-  const { browserClient, describePolicy } = await loadDescribe();
-  return describePolicy(description, browserClient(apiKey), { model });
+  const { browserClient, describePolicy, providerFor } = await loadDescribe();
+  return describePolicy(description, browserClient(providerFor(model), apiKey), { model });
 }
 
 export async function explainFailure(error: unknown): Promise<string> {

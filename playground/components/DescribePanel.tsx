@@ -5,6 +5,7 @@ import {
   defaultDescribeModel,
   describeModels,
   isDescribeModelId,
+  providerLabel,
   type DescribeModelId,
 } from "depbot-policy/describe-models";
 import { useId, useState, type FormEvent } from "react";
@@ -33,6 +34,25 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
   const [status, setStatus] = useState<Status>({ state: "idle" });
   const fieldId = useId();
   const loading = status.state === "loading";
+
+  // The chosen model decides which provider we talk to, which drives the key field, its help
+  // text, and the wording of the result. The model always resolves, so the lookup can't miss.
+  const provider = describeModels.find((option) => option.id === model)!.provider;
+  const product = providerLabel(provider);
+  const key = {
+    anthropic: {
+      name: "Anthropic",
+      placeholder: "sk-ant-…",
+      to: "Anthropic",
+      href: "https://console.anthropic.com/settings/keys",
+    },
+    google: {
+      name: "Gemini",
+      placeholder: "AIza…",
+      to: "Google's Gemini API",
+      href: "https://aistudio.google.com/apikey",
+    },
+  }[provider];
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -81,16 +101,22 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
               aria-describedby={`${fieldId}-model-help`}
               className={inputClass}
             >
-              {describeModels.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
+              {((["anthropic", "google"] as const).map((provider) => (
+                <optgroup key={provider} label={providerLabel(provider)}>
+                  {describeModels
+                    .filter((option) => option.provider === provider)
+                    .map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                </optgroup>
+              )))}
             </select>
           </div>
           <div className="flex min-w-64 flex-1 flex-col gap-1.5">
             <label htmlFor={`${fieldId}-key`} className={labelClass}>
-              Anthropic API key
+              {key.name} API key
             </label>
             <input
               id={`${fieldId}-key`}
@@ -99,7 +125,7 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
               onChange={(event) => setApiKey(event.target.value)}
               autoComplete="off"
               spellCheck={false}
-              placeholder="sk-ant-…"
+              placeholder={key.placeholder}
               aria-describedby={`${fieldId}-key-help`}
               className={`${inputClass} font-mono`}
             />
@@ -115,13 +141,13 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
         </div>
 
         <p id={`${fieldId}-model-help`} className="text-xs text-zinc-600 dark:text-zinc-400">
-          {describeModels.find((option) => option.id === model)?.summary}, charged to your account.
+          {describeModels.find((option) => option.id === model)?.summary}, using your own API key.
         </p>
         <p id={`${fieldId}-key-help`} className="text-xs text-zinc-500 dark:text-zinc-400">
-          Your key goes straight from this browser to Anthropic and is forgotten when you leave the
+          Your key goes straight from this browser to {key.to} and is forgotten when you leave the
           page.{" "}
           <a
-            href="https://console.anthropic.com/settings/keys"
+            href={key.href}
             className="underline underline-offset-2 hover:text-zinc-900 dark:hover:text-zinc-100"
           >
             Get a key
@@ -138,11 +164,11 @@ export function DescribePanel({ id, onGenerated }: DescribePanelProps) {
             <div className="flex flex-col gap-1 text-sm text-zinc-700 dark:text-zinc-300">
               <p>
                 {status.errorCount === 0
-                  ? "Claude wrote the policy below. Review it before using it."
-                  : `Claude wrote the policy below, but it still has ${status.errorCount === 1 ? "1 problem" : `${status.errorCount} problems`} to fix by hand.`}
+                  ? `${product} wrote the policy below. Review it before using it.`
+                  : `${product} wrote the policy below, but it still has ${status.errorCount === 1 ? "1 problem" : `${status.errorCount} problems`} to fix by hand.`}
               </p>
               {status.notes.length > 0 && (
-                <ul aria-label="Claude's notes" className="list-disc pl-5 text-zinc-600 dark:text-zinc-400">
+                <ul aria-label={`${product}'s notes`} className="list-disc pl-5 text-zinc-600 dark:text-zinc-400">
                   {status.notes.map((note) => (
                     <li key={note}>{note}</li>
                   ))}

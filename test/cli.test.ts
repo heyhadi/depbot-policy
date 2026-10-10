@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { exitCodes, run, type CliIo } from "../src/cli.ts";
 import { DescribeError } from "../src/describe.ts";
 import { parsePolicy } from "../src/index.ts";
@@ -18,7 +18,10 @@ beforeEach(() => {
   fakeDescribe = undefined;
 });
 
-afterEach(() => rmSync(cwd, { recursive: true }));
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(cwd, { recursive: true });
+});
 
 let fakeDescribe: CliIo["describe"];
 
@@ -222,6 +225,7 @@ describe("init --describe", () => {
 
     expect(stderr).toContain("Unknown model: gpt-5");
     expect(stderr).toContain("claude-sonnet-5-5");
+    expect(stderr).toContain("gemini-3-flash-preview");
     expect(existsSync(path.join(cwd, "depbot.policy.yml"))).toBe(false);
   });
 
@@ -253,6 +257,45 @@ describe("init --describe", () => {
 
     expect(stderr).toContain("Claude declined");
     expect(existsSync(path.join(cwd, "depbot.policy.yml"))).toBe(false);
+  });
+
+  it("tells you to set GEMINI_API_KEY, once, when a Gemini model has no key", async () => {
+    vi.stubEnv("GEMINI_API_KEY", undefined);
+    vi.stubEnv("GOOGLE_API_KEY", undefined);
+
+    // No stand-in describer: this goes through the real path, which stops before any request.
+    expect(await cli("init", "--describe", "npm", "--model", "gemini-3-flash-preview")).toBe(
+      exitCodes.failed,
+    );
+
+    expect(stderr.match(/No Gemini API key found\. Set GEMINI_API_KEY\./g)).toHaveLength(1);
+    expect(stderr).not.toContain("ANTHROPIC_API_KEY");
+    expect(existsSync(path.join(cwd, "depbot.policy.yml"))).toBe(false);
+  });
+
+  it("hints at ANTHROPIC_API_KEY when a Claude model fails without credentials", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", undefined);
+    vi.stubEnv("ANTHROPIC_AUTH_TOKEN", undefined);
+    fakeDescribe = async () => {
+      throw new Error("Could not resolve authentication method");
+    };
+
+    expect(await cli("init", "--describe", "npm", "--model", "claude-haiku-5-5")).toBe(
+      exitCodes.failed,
+    );
+
+    expect(stderr).toContain("Set ANTHROPIC_API_KEY");
+  });
+
+  it("doesn't hint at an Anthropic key for a Gemini failure", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", undefined);
+    fakeDescribe = async () => {
+      throw new Error("boom");
+    };
+
+    await cli("init", "--describe", "npm", "--model", "gemini-3.1-pro-preview");
+
+    expect(stderr).not.toContain("ANTHROPIC_API_KEY");
   });
 
   it("doesn't overwrite an existing policy", async () => {
