@@ -1,6 +1,6 @@
 {
   "name": "depbot-policy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "One policy file → dependabot.yml, a safe auto-merge workflow, a block list, and a weekly review rotation",
   "keywords": [
     "dependabot",
