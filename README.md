@@ -87,8 +87,8 @@ git commit -m "Manage Dependabot with depbot-policy"
 
 Then do the one-time [repository setup](#repository-setup), so that auto-merge waits for CI.
 
-Prefer to describe what you want? `npx depbot-policy init --describe "…"` has Claude write the
-policy for you. See [Writing a policy with AI](#writing-a-policy-with-ai).
+Prefer to describe what you want? `npx depbot-policy init --describe "…"` has an AI model (Claude
+or Gemini) write the policy for you. See [Writing a policy with AI](#writing-a-policy-with-ai).
 
 To change anything later, edit `depbot.policy.yml` and run `npx depbot-policy generate` again.
 Don't edit the generated files by hand. [`check`](#keeping-files-in-sync-in-ci) catches that.
@@ -99,7 +99,7 @@ Don't edit the generated files by hand. [`check`](#keeping-files-in-sync-in-ci) 
 depbot-policy <command> [options]
 
 Commands:
-  init        Create a starter depbot.policy.yml, or one written by Claude with --describe
+  init        Create a starter depbot.policy.yml, or one written by AI with --describe
   generate    Write .github/dependabot.yml and the auto-merge workflow
   check       Fail if the policy is invalid or the generated files are out of date
   reviewer    Print this week's reviewer from review.rotation
@@ -108,9 +108,17 @@ Options:
   --policy <file>   Policy file (default: depbot.policy.yml)
   --out <dir>       Repository root to write to or check (default: .)
   --dry-run         generate: print the files instead of writing them
-  --describe <text> init: have Claude write the policy from a description
-                    (needs ANTHROPIC_API_KEY)
-  --model <id>      init --describe: which Claude model to use (default: claude-opus-5-5)
+  --describe <text> init: have an AI model write the policy from a description
+                    (needs ANTHROPIC_API_KEY or GEMINI_API_KEY)
+  --model <id>      init --describe: which model to use (default: claude-opus-5-5)
+                      Claude models:
+                      claude-opus-5-5         Recommended: best balance of quality and cost, about 3–5¢ per policy
+                      claude-sonnet-5-5       Faster and cheaper, about 2¢ per policy
+                      claude-haiku-5-5        Fastest and cheapest, well under 1¢ per policy
+                      claude-fable-5-1        Most capable and most expensive, about 8–13¢ per policy
+                      Gemini models:
+                      gemini-3-flash-preview  Fast and cheap, under 1¢ per policy (free tier available)
+                      gemini-3.1-pro-preview  More capable, about 2–3¢ per policy
   --force           init: overwrite an existing policy file
   --date <date>     reviewer: use this date instead of today (e.g. 2026-10-12)
   -h, --help        Show this help
@@ -137,35 +145,38 @@ You can also install it as a dev dependency (`npm install --save-dev depbot-poli
 
 ## Writing a policy with AI
 
-Describe your setup in plain words and let Claude write the policy:
+Describe your setup in plain words and let an AI model (Claude or Gemini) write the policy:
 
 ```sh
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...     # or: export GEMINI_API_KEY=AIza... with a gemini model
 npx depbot-policy init --describe "pnpm monorepo with apps in /apps/web and /apps/api, \
   plus Dockerfiles. Auto-merge patch updates to dev dependencies. Never update react \
   until we migrate to 19. alice and bob-smith take turns reviewing."
+
+npx depbot-policy init --describe "..." --model gemini-3-flash-preview   # use Gemini instead
 ```
 
-Example output (Claude's notes vary):
+Example output (the model's notes vary):
 
 ```text
-Asking Claude to write the policy...
+Asking Claude Opus 5.5 to write the policy...
 Note: Assumed a weekly schedule, since none was given.
 Created depbot.policy.yml. Review it, then run: depbot-policy generate
 ```
 
 The [playground](#web-playground) has the same feature under **Describe with AI**.
 
-**How it works.** Claude only writes the *policy*. It never writes the workflow or
+**How it works.** The model only writes the *policy*. It never writes the workflow or
 `dependabot.yml`.
 
-1. Claude fills in a simplified version of the policy schema, using
-   [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), and
-   adds short notes about any assumptions it made.
+1. The model fills in a simplified version of the policy schema and adds short notes about any
+   assumptions it made. Claude uses
+   [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs);
+   Gemini uses JSON output with a response schema. Both are held to the same schema.
 2. depbot-policy turns that into YAML and validates it with the same rules as a hand-written
    policy.
-3. If anything fails validation, the errors go back to Claude once to fix. Anything still wrong is
-   reported with its line and column, like any other policy error.
+3. If anything fails validation, the errors go back to the model once to fix. Anything still wrong
+   is reported with its line and column, like any other policy error.
 4. You review the policy. `generate` then produces the files with the same deterministic code as
    always.
 
@@ -174,8 +185,8 @@ Dependabot-only checks, no major auto-merges) don't depend on the model.
 
 **Details:**
 
-- **Models:** pick one with `--model <id>` (or the Model menu in the playground). All run at low
-  effort, and costs are rough list-price estimates per policy:
+- **Models:** pick one with `--model <id>` (or the Model menu in the playground). Claude models run
+  at low effort. Costs are rough list-price estimates per policy:
 
   | Model | `--model` | About |
   |---|---|---|
@@ -183,13 +194,19 @@ Dependabot-only checks, no major auto-merges) don't depend on the model.
   | Claude Sonnet 5.5 | `claude-sonnet-5-5` | 2¢, faster and cheaper |
   | Claude Haiku 5.5 | `claude-haiku-5-5` | well under 1¢, fastest and cheapest |
   | Claude Fable 5.1 | `claude-fable-5-1` | 8–13¢, most capable |
+  | Gemini 3 Flash | `gemini-3-flash-preview` | under 1¢, and Google lists it as free-tier eligible |
+  | Gemini 3.1 Pro | `gemini-3.1-pro-preview` | 2–3¢, more capable |
 
   Try a cheaper model first. This is a short, well-specified task, and every result is validated
-  and shown to you before it's used.
-- **Credentials:** the CLI reads `ANTHROPIC_API_KEY`, or a login from Anthropic's `ant` CLI.
-- **Privacy:** only your description is sent to Anthropic. The playground sends it straight from
-  your browser, keeps your key in memory only, and forgets it when you leave the page.
-- **Exit codes:** if Claude declines, or the result still has errors after the repair attempt,
+  and shown to you before it's used. The Gemini models are previews, so Google may change or
+  retire them.
+- **Credentials:** for Claude, the CLI reads `ANTHROPIC_API_KEY`, or a login from Anthropic's
+  `ant` CLI. For Gemini, it reads `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). In the playground, paste
+  a key for the provider of the model you picked.
+- **Privacy:** only your description is sent, to the provider whose model you choose (Anthropic or
+  Google). The playground sends it straight from your browser, keeps your key in memory only, and
+  forgets it when you leave the page.
+- **Exit codes:** if the model declines, or the result still has errors after the repair attempt,
   `init --describe` exits with `1`. If there are remaining errors, it still writes the file so you
   can fix them by hand.
 
@@ -453,8 +470,8 @@ Rules worth knowing:
 policy and see the generated files as you type.
 
 - **Describe with AI.** Describe your setup in plain words, paste your own Anthropic API key, and
-  Claude writes the policy into the editor, with notes on any assumptions it made. You can choose
-  between four Claude models. See
+  the model writes the policy into the editor, with notes on any assumptions it made. You can choose
+  between four Claude models and two Gemini models. See
   [Writing a policy with AI](#writing-a-policy-with-ai).
 - **Live validation.** Errors are underlined in the editor and listed below it in line order.
   Click one to jump to the exact text.
@@ -510,7 +527,7 @@ Everything is pure: no file system, network or global state. That's what lets th
 the CLI, in tests and in the browser.
 
 To write a policy from a description, import from `depbot-policy/describe`. It's a separate entry
-point, so the core library never loads the Anthropic SDK:
+point, so the core library never loads the Anthropic or Google SDKs:
 
 ```ts
 import Anthropic from "@anthropic-ai/sdk";
@@ -521,7 +538,16 @@ const { source, errors, notes } = await describePolicy(
   new Anthropic(), // reads ANTHROPIC_API_KEY
   { model: "claude-sonnet-5-5" }, // optional; defaults to claude-opus-5-5
 );
-// source: policy YAML, errors: [] when valid, notes: Claude's assumptions
+// source: policy YAML, errors: [] when valid, notes: the model's assumptions
+```
+
+For a Gemini model, pass a Google client instead. The client has to match the model's provider, or
+`describePolicy` throws:
+
+```ts
+import { GoogleGenAI } from "@google/genai";
+
+await describePolicy("npm project", new GoogleGenAI({ apiKey }), { model: "gemini-3-flash-preview" });
 ```
 
 ## Development
@@ -567,7 +593,7 @@ src/
   dependabot.ts      dependabot.yml generator
   workflow.ts        Auto-merge workflow generator
   rotation.ts        Weekly reviewer: TypeScript formula and the workflow's shell version
-  describe.ts        Write a policy from a description with Claude (depbot-policy/describe)
+  describe.ts        Write a policy from a description with Claude or Gemini (depbot-policy/describe)
   describe-models.ts The models it can use, kept free of the SDK so help text and UI can list them
   files.ts           generateFiles: every generated file and its path
   cli.ts, bin.ts     The depbot-policy command (bin.ts is the executable entry point)
@@ -594,8 +620,9 @@ depbot.policy.yml    This repository's own policy; .github/dependabot.yml and th
 - **Rotation:** the workflow's shell script runs in bash, with stand-in `date` and `gh` commands,
   and must pick the same person as `reviewerFor` on every test date.
 - **CLI:** every command runs against a real temporary directory.
-- **AI:** tests use a stand-in client, so they never call the API. They cover the request (model,
-  structured output format, refusal fallback for each model), the repair loop, replies Claude can't use, and
+- **AI:** tests use real client objects with the request method stubbed, so they never call an API.
+  They cover the request (model,
+  structured output format, refusal fallback for each model), the repair loop, replies the model can't use, and
   error messages.
 - **Playground:** unit tests for its logic, plus tests of the whole page with React Testing Library.
   CodeMirror can't run in jsdom, so the tests replace the two small editor components with plain
@@ -659,7 +686,7 @@ Short versions of the main decisions. The pull requests have the full reasoning.
   browser.
 - **Generated YAML via the `yaml` document API**, not string templates. The library handles quoting
   (`"@types/*"` must be quoted) and comments.
-- **AI writes the policy, never the workflow.** Claude handles what needs judgment (understanding a
+- **AI writes the policy, never the workflow.** The model handles what needs judgment (understanding a
   description). Validation and generation stay deterministic, so a bad model reply can't weaken
   the security properties.
 - **Stateless rotation.** The reviewer is a function of the week, so there's nothing to store, sync
